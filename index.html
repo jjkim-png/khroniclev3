@@ -3,10 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Khronicle PRO — TK22 (Multi-Round · DSG · Accuracy · Report)</title>
+<title>Khronicle PRO — Green Map σ-Dispersion (Visual Revamp)</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
 <style>
 :root{
   --brand:#2b2363; --accent:#4b3dd1; --good:#10b981; --bad:#ef4444; --warn:#f59e0b;
@@ -14,7 +13,7 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",Helvetica,Arial,sans-serif}
-.wrap{max-width:1400px;margin:0 auto;padding:16px}
+.wrap{max-width:1420px;margin:0 auto;padding:16px}
 .toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:10px 12px;box-shadow:var(--shadow)}
 .toolbar .left,.toolbar .right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .pill{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:999px;background:#eef2ff;color:#3730a3}
@@ -29,25 +28,32 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-syst
 @media(max-width:1100px){.grid.two,.grid.three{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:14px;box-shadow:var(--shadow)}
 .section-title{font-weight:800;font-size:18px;margin:4px 0 10px}
-input[type="file"]{display:none}
-.file-label{border:1px dashed var(--border);padding:10px 12px;border-radius:12px;background:#fafbff;cursor:pointer}
-textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:12px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .small{font-size:12px;color:var(--muted)}
-.badge{display:inline-block;padding:2px 8px;border-radius:10px;background:#eee;font-size:12px}
 .kpis{display:flex;gap:8px;flex-wrap:wrap}
 .kpi{flex:1;min-width:160px;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
 .kpi h4{margin:0 0 6px 0;font-size:12px;color:#374151}
 .kpi .v{font:600 18px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-canvas{width:100%!important;height:360px!important}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:3px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);background:#fff}
+.badge.ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+.badge.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+.badge.bad{background:#fef2f2;border-color:#fecaca;color:#991b1b}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
-.table-wrap{overflow:auto;max-height:520px;border:1px solid var(--border);border-radius:12px}
+.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:12px;max-height:520px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left;white-space:nowrap}
-tr.total td{font-weight:700}
-.status.ok{color:var(--good)}.status.bad{color:var(--bad)}.status.warn{color:var(--warn)}
-.help{color:#374151}
-@media print{ .toolbar, .no-print {display:none!important} .card{box-shadow:none;border:1px solid #ddd} body{background:#fff} }
+canvas{width:100%!important;height:360px!important}
+
+/* Green Map canvas wrapper for overlays */
+.canvas-wrap{position:relative}
+#canvasHM{border:1px solid var(--border);border-radius:14px;background:#f8fafc}
+.hm-stats{position:absolute;left:10px;top:10px}
+.hm-legend{position:absolute;right:10px;top:10px;display:flex;gap:6px;align-items:center}
+.hm-legend .box{width:14px;height:10px;border:1px solid var(--border);border-radius:3px}
+@media print{ .toolbar,.no-print{display:none!important} .card{box-shadow:none;border:1px solid #ddd} body{background:#fff}}
+input[type="file"]{display:none}
+.file-label{border:1px dashed var(--border);padding:10px 12px;border-radius:12px;background:#fafbff;cursor:pointer}
+textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:12px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 </style>
 </head>
 <body>
@@ -86,13 +92,15 @@ tr.total td{font-weight:700}
         <input id="fltTo" type="date" class="select">
         <button class="btn brand" id="btnApplyFilters">적용</button>
       </div>
-      <div class="small help" style="margin-top:6px">* 필터는 모든 차트/테이블/리포트에 즉시 반영됩니다.</div>
+      <div class="small" style="margin-top:6px">* 필터는 모든 차트/테이블/리포트에 즉시 반영됩니다.</div>
     </div>
+
     <div class="card">
       <div class="section-title">데이터 붙여넣기</div>
       <textarea id="pasteArea" placeholder='{"schema_version":"kdk-1.0.0","rounds":[...],"shots":[...]}'></textarea>
       <div class="row" style="margin-top:8px"><button class="btn" id="btnApplyPaste">적용</button><span id="validBadge" class="pill muted">유효성: 미확인</span></div>
     </div>
+
     <div class="card">
       <div class="section-title">앵커 v2 붙여넣기(선택)</div>
       <textarea id="pasteAnchor" placeholder='{"schema":"expected-v2","putt_ft":[...100],"off_yd":{"FW":[...],"RF":[...],"BK":[...],"TR":[...],"HZ":[...]}}'></textarea>
@@ -130,21 +138,36 @@ tr.total td{font-weight:700}
     </div>
   </div>
 
-  <div class="grid three">
+  <!-- GREEN MAP σ-DISPERSION (VISUAL REVAMP) -->
+  <div class="grid two">
     <div class="card">
-      <div class="section-title">APP/ARG 좌표 분포(σ 타원)</div>
-      <canvas id="canvasHM" width="520" height="380" style="border:1px solid var(--border);border-radius:12px;background:#f3f4f6"></canvas>
-      <div class="small">● 그린 착지 좌표, 타원=1σ/2σ (좌우=편차, 앞뒤=길이)</div>
+      <div class="section-title">그린·핀 기준 분산 지도 (σ 타원)</div>
+      <div class="row small">
+        <label>그린 길이(m)</label><input id="greenLen" type="number" class="select" value="30" min="10" max="60" step="1"/>
+        <label>그린 폭(m)</label><input id="greenWid" type="number" class="select" value="20" min="8" max="40" step="1"/>
+        <label>링 간격(m)</label><input id="ringStep" type="number" class="select" value="5" min="2" max="10" step="1"/>
+        <label class="small"><input id="optRings" type="checkbox" checked/> Rings</label>
+        <label class="small"><input id="optFill" type="checkbox" checked/> 1σ Fill</label>
+        <label class="small"><input id="optDensity" type="checkbox" checked/> Density</label>
+        <label class="small"><input id="optPoints" type="checkbox" checked/> Points</label>
+        <button class="btn ghost" id="btnRedrawHM">적용</button>
+      </div>
+      <div class="canvas-wrap" style="margin-top:8px">
+        <canvas id="canvasHM" width="640" height="420"></canvas>
+        <div id="hmStats" class="badge hm-stats">–</div>
+        <div class="hm-legend small">
+          <span class="box" style="background:#ccfbe5"></span><span>그린</span>
+          <span class="box" style="background:#86efac"></span><span>1σ</span>
+          <span class="box" style="background:#fff"></span><span style="border-bottom:2px dashed #6b7280">2σ</span>
+        </div>
+      </div>
+      <div class="small" style="margin-top:6px">핀은 중심(0,0). 동심원 숫자는 핀으로부터의 <b>거리(m)</b>. 화살표는 <b>평균 편차 벡터</b>(r̄=평균 분산거리).</div>
     </div>
+
     <div class="card">
-      <div class="section-title">라운드별 DSG 합계</div>
+      <div class="section-title">라운드별 DSG 합계 & Accuracy %</div>
       <canvas id="dsgChart"></canvas>
       <div class="small">DSG = -k(R)·(|D|/R)² (대상: APP/ARG, ≤200m)</div>
-    </div>
-    <div class="card">
-      <div class="section-title">Accuracy Index (APP/ARG)</div>
-      <canvas id="accChart"></canvas>
-      <div class="small">Acc = exp(-(Bias²+σ²)/r²), r≈중앙값 거리의 6%</div>
     </div>
   </div>
 
@@ -157,7 +180,7 @@ tr.total td{font-weight:700}
       <div class="section-title">품질 점검</div>
       <ul id="dqList" class="small" style="line-height:1.6"></ul>
       <hr class="sep"/>
-      <div class="help small">권장 입력 필드: <code>coord.x_rel_m,y_rel_m</code> → <code>rel_x_m, rel_y_m</code> → <code>bearing+to_pin</code> 순</div>
+      <div class="small">권장 입력: <code>coord.x_rel_m,y_rel_m</code> → 없으면 <code>rel_x_m, rel_y_m</code> → 또는 <code>bearing+to_pin</code></div>
     </div>
   </div>
 
@@ -167,7 +190,6 @@ tr.total td{font-weight:700}
       <div id="roundTable"></div>
     </div>
   </div>
-
 </div>
 
 <script>
@@ -175,7 +197,7 @@ tr.total td{font-weight:700}
 let APP = { raw:null, rounds:[], shots:[], charts:{}, anchor:null };
 let FILTER = { type:'all', player:'all', course:'all', from:null, to:null };
 
-// ===== 앵커 v2 =====
+// ===== 앵커 v2 (토이) =====
 const BUILTIN_ANCHOR = {
   schema:"builtin-toy",
   putt_ft: Array.from({length:100}, (_,i)=> Math.max(1, Math.min(3, 0.80*Math.log((i+1)+1) + 0.9 ))),
@@ -197,8 +219,8 @@ const $=(s)=>document.querySelector(s);
 function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
 function lerp(a,b,t){ return a+(b-a)*t; }
 function interp1(arr, idx){ const i0=clamp(Math.floor(idx),0,arr.length-1), i1=clamp(i0+1,0,arr.length-1), t=clamp(idx-i0,0,1); return lerp(arr[i0],arr[i1],t); }
-function mapLieKey(lieRaw){ const s=String(lieRaw||"").toUpperCase(); if(s.includes("BK")) return "BK"; if(s.includes("HZ")) return "HZ"; if(s.includes("TR")||s.includes("TREE")) return "TR"; if(s.includes("RF")||s.includes("R")||s.includes("FESCUE")) return "RF"; return "FW"; }
-function expectedFromV2(distance_m, phase, lie, on_green){ const A=APP.anchor||BUILTIN_ANCHOR; if(on_green || phase==='putt'){ const ft=clamp((distance_m||0)*3.28084, 1, 100); return interp1(A.putt_ft, ft-1);} else { const yd=clamp((distance_m||0)*1.09361, 5, 250); const key=mapLieKey(lie); const tbl=A.off_yd[key]||A.off_yd.FW; return interp1(tbl, yd-5);} }
+function mapLieKey(lieRaw){ const s=String(lieRaw||"").toUpperCase(); if(s.includes("HZ")) return "HZ"; if(s.includes("BK")) return "BK"; if(s.includes("TR")||s.includes("TREE")) return "TR"; if(s.includes("RF")||s.includes("R")||s.includes("FESCUE")) return "RF"; return "FW"; }
+function expectedFromV2(distance_m, phase, lie, on_green){ const A=APP.anchor||BUILTIN_ANCHOR; if(on_green || String(phase||'').toLowerCase()==='putt'){ const ft=clamp((distance_m||0)*3.28084, 1, 100); return interp1(A.putt_ft, ft-1);} else { const yd=clamp((distance_m||0)*1.09361, 5, 250); const key=mapLieKey(lie); const tbl=A.off_yd[key]||A.off_yd.FW; return interp1(tbl, yd-5);} }
 function expectedStrokes(distance_m, phase, lie, on_green){ return expectedFromV2(distance_m, phase, lie, on_green); }
 function dateISO(d){ try{ return new Date(d).toISOString().slice(0,10);}catch(e){ return null } }
 
@@ -208,24 +230,21 @@ function dispersionSG(Dm, Rm){ const R = Number(Rm)||0; if(R<=0 || Dm==null || i
 function accuracyIndex(bias, sigma, r){ if(!r || r<=0) return 0; return Math.exp(-((bias*bias + sigma*sigma)/(r*r))); }
 function recommendR(samples){ if(!samples || !samples.length) return 10; const rs = samples.map(v=>Math.max(5, Math.min(200, Number(v.R)||0))).sort((a,b)=>a-b); const mid = rs[Math.floor(rs.length/2)] || 50; return Math.max(3, Math.round(mid*0.06)); }
 function lateralD(s){ if(s.coord && typeof s.coord.x_rel_m==="number") return s.coord.x_rel_m; if(typeof s.rel_x_m==="number") return s.rel_x_m; if(typeof s.landing_bearing_deg==="number" && typeof s.landing_to_pin_m==="number"){ const rad = s.landing_bearing_deg * Math.PI/180; return (s.landing_to_pin_m||0) * Math.cos(rad);} return null; }
+function getXY(s){ const x=(s.coord&&typeof s.coord.x_rel_m==="number")?s.coord.x_rel_m:(typeof s.rel_x_m==="number"?s.rel_x_m:null); const y=(s.coord&&typeof s.coord.y_rel_m==="number")?s.coord.y_rel_m:(typeof s.rel_y_m==="number"?s.rel_y_m:null); return {x,y}; }
 function isDSGTarget(s){ const ph = String(s.phase||'').toLowerCase(); if(ph==='putt') return false; if(ph!=='approach' && ph!=='around') return false; const R = Number(s.distance_m)||0; return (R>0 && R<=200); }
-
-// 분류/SG
 function classifyShot(s){ const p=String(s.phase||'').toLowerCase(); if(p==='tee') return 'OTT'; if(p==='approach') return 'APP'; if(p==='around') return 'ARG'; if(p==='putt') return 'PUTT'; return 'OTHER'; }
 function sgPerShot(s, next){ const start = (typeof s.distance_m==="number"? s.distance_m : s.remaining_m); const e0=expectedStrokes(start, s.phase, s.lie, s.on_green); const e1 = next? expectedStrokes((typeof next.distance_m==="number"? next.distance_m : next.remaining_m), next.phase, next.lie, next.on_green) : 0; const penalty=Number(s.penalty||0); return e0 - (1 + penalty + e1); }
 
-// 필터
-function renderFilters(){ const playerSet=new Set(APP.rounds.map(r=>r.playerId).filter(Boolean)); const courseSet=new Set(APP.rounds.map(r=>r.course).filter(Boolean)); const fp=$('#fltPlayer'); const fc=$('#fltCourse'); fp.innerHTML='<option value="all">Player: All</option>'+Array.from(playerSet).map(p=>`<option value="${p}">${p}</option>`).join(''); fc.innerHTML='<option value="all">Course: All</option>'+Array.from(courseSet).map(c=>`<option value="${c}">${c}</option>`).join(''); }
+// ===== 필터 =====
+function renderFilters(){ const playerSet=new Set(APP.rounds.map(r=>r.playerId).filter(Boolean)); const courseSet=new Set(APP.rounds.map(r=>r.course).filter(Boolean)); $('#fltPlayer').innerHTML='<option value="all">Player: All</option>'+Array.from(playerSet).map(p=>`<option value="${p}">${p}</option>`).join(''); $('#fltCourse').innerHTML='<option value="all">Course: All</option>'+Array.from(courseSet).map(c=>`<option value="${c}">${c}</option>`).join(''); }
 function applyFilters(){ FILTER.type=$('#fltType').value; FILTER.player=$('#fltPlayer').value; FILTER.course=$('#fltCourse').value; FILTER.from=$('#fltFrom').value||null; FILTER.to=$('#fltTo').value||null; drawAll(); }
 function roundInFilter(r){ if(FILTER.type!=='all' && (r.type||'').toLowerCase()!==FILTER.type) return false; if(FILTER.player!=='all' && r.playerId!==FILTER.player) return false; if(FILTER.course!=='all' && r.course!==FILTER.course) return false; const di = dateISO(r.date); if(FILTER.from && di && di<FILTER.from) return false; if(FILTER.to && di && di>FILTER.to) return false; return true; }
 function filteredRounds(){ return APP.rounds.filter(roundInFilter); }
 function filteredShots(){ const set=new Set(filteredRounds().map(r=>r.roundId)); return APP.shots.filter(s=> set.has(s.roundId)); }
-
-// 그룹
 function groupByRound(shots){ const by=new Map(); for(const s of shots){ const k=s.roundId||'R?'; if(!by.has(k)) by.set(k,[]); by.get(k).push(s); } for(const arr of by.values()){ arr.sort((a,b)=> (a.hole-b.hole)||(a.sequence-b.sequence)); } return by; }
 function roundsById(){ const m=new Map(); for(const r of APP.rounds){ m.set(r.roundId, r); } return m; }
 
-// 집계
+// ===== 집계 =====
 function perRoundAgg(){ const by=groupByRound(filteredShots()); const rmap=roundsById(); const rows=[]; for(const [rid, arr] of by.entries()){
   let sg=0, comp={OTT:0,APP:0,ARG:0,PUTT:0}, pen=0, onePutts=0, threePutts=0; let firHit=0, firCh=0, girHit=0, girCh=0; let updownMake=0, updownCh=0, sandSave=0, sandCh=0; let lastHole=null; let dsgTotal=0, dsgApp=0, dsgArg=0; const samplesAPP=[], samplesARG=[]; const puttsByHole=new Map();
   for(let i=0;i<arr.length;i++){
@@ -245,7 +264,7 @@ function perRoundAgg(){ const by=groupByRound(filteredShots()); const rmap=round
  }
  return rows; }
 
-// KPI + 품질
+// ===== KPI + 품질 =====
 function pct(a,b){ return (b>0)? +(100*a/b).toFixed(1) : 0; }
 function renderKPIs(){ const rounds=filteredRounds(); const shots=filteredShots(); const rows=perRoundAgg(); const kpi=[
   {t:'라운드', v: rounds.length},
@@ -254,9 +273,7 @@ function renderKPIs(){ const rounds=filteredRounds(); const shots=filteredShots(
   {t:'FIR%', v: (rows.length? (rows.reduce((a,r)=>a+pct(r.fir.hit, r.fir.ch),0)/rows.length).toFixed(1):'0.0')+ '%'},
   {t:'GIR%', v: (rows.length? (rows.reduce((a,r)=>a+pct(r.gir.hit, r.gir.ch),0)/rows.length).toFixed(1):'0.0')+ '%'},
   {t:'DSG/라운드', v: (rows.reduce((a,r)=>a+r.dsg.total,0)/(rows.length||1)).toFixed(2)}
-];
-  const host=$('#kpiBox'); host.innerHTML=''; kpi.forEach(k=>{ const d=document.createElement('div'); d.className='kpi'; d.innerHTML=`<h4>${k.t}</h4><div class="v">${k.v}</div>`; host.appendChild(d); });
-}
+]; const host=$('#kpiBox'); host.innerHTML=''; kpi.forEach(k=>{ const d=document.createElement('div'); d.className='kpi'; d.innerHTML=`<h4>${k.t}</h4><div class="v">${k.v}</div>`; host.appendChild(d); }); }
 
 function renderDQ(){ const shots = filteredShots(); const total = shots.length || 1; const dsgTar = shots.filter(isDSGTarget); const withCoord = dsgTar.filter(s=> lateralD(s)!=null ); const warns = [];
   const pDsg = +(100*dsgTar.length/total).toFixed(1); const pCoord = +(100*withCoord.length/(dsgTar.length||1)).toFixed(1);
@@ -266,46 +283,208 @@ function renderDQ(){ const shots = filteredShots(); const total = shots.length |
   const ul=$('#dqList'); ul.innerHTML = warns.map(w=>`<li>${w}</li>`).join('');
 }
 
-// 표/차트
+// ===== 차트 =====
 function drawCharts(){ const rows = perRoundAgg(); const labels = rows.map(r=>r.roundId);
   APP.charts.sg && APP.charts.sg.destroy(); APP.charts.sg = new Chart($('#sgChart').getContext('2d'), { type:'bar', data:{ labels, datasets:[{ label:'SG(합계)', data:rows.map(r=>r.sg) }] }, options:{ responsive:true, plugins:{ legend:{display:false} }, scales:{ y:{ beginAtZero:true } } } });
   const dOTT=rows.map(r=>r.comp.OTT), dAPP=rows.map(r=>r.comp.APP), dARG=rows.map(r=>r.comp.ARG), dPUTT=rows.map(r=>r.comp.PUTT); APP.charts.sgStack && APP.charts.sgStack.destroy(); APP.charts.sgStack = new Chart($('#sgStack').getContext('2d'), { type:'bar', data:{ labels, datasets:[ {label:'OTT', data:dOTT, stack:'sg'}, {label:'APP', data:dAPP, stack:'sg'}, {label:'ARG', data:dARG, stack:'sg'}, {label:'PUTT',data:dPUTT,stack:'sg'} ] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true } } } });
   const firPct = rows.map(r=>pct(r.fir.hit, r.fir.ch)); const girPct = rows.map(r=>pct(r.gir.hit, r.gir.ch)); APP.charts.fg && APP.charts.fg.destroy(); APP.charts.fg = new Chart($('#firGirChart').getContext('2d'), { type:'line', data:{ labels, datasets:[ {label:'FIR %', data:firPct}, {label:'GIR %', data:girPct} ]}, options:{ responsive:true } });
   const udPct = rows.map(r=>pct(r.updown.make, r.updown.ch)); const ssPct = rows.map(r=>pct(r.sand.make, r.sand.ch)); APP.charts.ud && APP.charts.ud.destroy(); APP.charts.ud = new Chart($('#udChart').getContext('2d'), { type:'bar', data:{ labels, datasets:[ {label:'Up&Down %', data:udPct}, {label:'Sand Save %', data:ssPct} ]}, options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } } });
   const oneP = rows.map(r=>r.putt.one); const threeP = rows.map(r=>r.putt.three); const avgP = rows.map(r=>r.putt.avg); APP.charts.putt && APP.charts.putt.destroy(); APP.charts.putt = new Chart($('#puttChart').getContext('2d'), { type:'bar', data:{ labels, datasets:[ {label:'1펏 수', data:oneP, yAxisID:'y'}, {label:'3펏 수', data:threeP, yAxisID:'y'}, {label:'평균 퍼트(홀당)', data:avgP, type:'line', yAxisID:'y1'} ]}, options:{ responsive:true, scales:{ y:{ beginAtZero:true }, y1:{ position:'right', beginAtZero:true } } } });
-  APP.charts.dsg && APP.charts.dsg.destroy(); APP.charts.dsg = new Chart($('#dsgChart').getContext('2d'), { type:'bar', data:{ labels, datasets:[{ label:'DSG Total', data:rows.map(r=>r.dsg.total) }] }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true } } } });
-  APP.charts.acc && APP.charts.acc.destroy(); APP.charts.acc = new Chart($('#accChart').getContext('2d'), { type:'line', data:{ labels, datasets:[ {label:'APP Accuracy %', data: rows.map(r=> (r.acc?.APP?.acc||0)*100 )}, {label:'ARG Accuracy %', data: rows.map(r=> (r.acc?.ARG?.acc||0)*100 )} ]}, options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } } });
+  APP.charts.dsg && APP.charts.dsg.destroy(); APP.charts.dsg = new Chart($('#dsgChart').getContext('2d'), { type:'bar', data:{ labels, datasets:[{ label:'DSG Total', data:rows.map(r=>r.dsg.total) },{ label:'Acc(APP)%', data:rows.map(r=>(r.acc?.APP?.acc||0)*100), type:'line', yAxisID:'y1'},{ label:'Acc(ARG)%', data:rows.map(r=>(r.acc?.ARG?.acc||0)*100), type:'line', yAxisID:'y1'}] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true }, y1:{ position:'right', beginAtZero:true, max:100 } } } });
 }
 
-// Heatmap with σ-ellipse
-function drawHeatmap(){ const canvas=$('#canvasHM'); const ctx=canvas.getContext('2d'); const W=canvas.width, H=canvas.height; ctx.clearRect(0,0,W,H); ctx.fillStyle='#f3f4f6'; ctx.fillRect(0,0,W,H); const pts = filteredShots().filter(s=> ['approach','around'].includes(String(s.phase||'').toLowerCase()) && s.on_green && (typeof (s.coord?.x_rel_m)==='number') && (typeof (s.coord?.y_rel_m)==='number')).map(s=>({x:s.coord.x_rel_m, y:s.coord.y_rel_m}));
-  // axes
-  ctx.strokeStyle='#d1d5db'; ctx.beginPath(); ctx.moveTo(20, H-20); ctx.lineTo(W-20, H-20); ctx.moveTo(40, H-20); ctx.lineTo(40, 20); ctx.stroke(); ctx.fillStyle='#111';
-  // scale: 1m -> 6px
-  const scale=6; const CX=40, CY=H-20; function tx(x){ return CX + x*scale } function ty(y){ return CY - y*scale }
-  // draw points
-  ctx.fillStyle='#111827'; pts.forEach(p=>{ ctx.beginPath(); ctx.arc(tx(p.x), ty(p.y), 2.5, 0, Math.PI*2); ctx.fill(); });
-  if(pts.length<3) return;
-  // covariance
-  const meanX=pts.reduce((a,b)=>a+b.x,0)/pts.length; const meanY=pts.reduce((a,b)=>a+b.y,0)/pts.length; let sxx=0, syy=0, sxy=0; pts.forEach(p=>{ const dx=p.x-meanX, dy=p.y-meanY; sxx+=dx*dx; syy+=dy*dy; sxy+=dx*dy; }); sxx/=pts.length; syy/=pts.length; sxy/=pts.length; const tr=sxx+syy, det=sxx*syy - sxy*sxy; const tmp=Math.sqrt(Math.max(0, tr*tr/4 - det)); const l1=tr/2 + tmp, l2=tr/2 - tmp; const theta=Math.atan2(l1 - sxx, sxy || 1e-9);
-  function ellipse(k, stroke){ const a=Math.sqrt(Math.max(l1,0))*k*scale, b=Math.sqrt(Math.max(l2,0))*k*scale; const cx=tx(meanX), cy=ty(meanY); ctx.save(); ctx.translate(cx,cy); ctx.rotate(-theta); ctx.beginPath(); for(let t=0;t<=360;t+=3){ const rad=t*Math.PI/180; const x=a*Math.cos(rad), y=b*Math.sin(rad); if(t===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);} ctx.strokeStyle=stroke; ctx.setLineDash([6,6]); ctx.lineWidth=2; ctx.stroke(); ctx.restore(); }
-  ellipse(1,'#111827'); ellipse(2,'#6b7280');
+// ===== Green Map σ-Dispersion =====
+function gatherAPP_ARG_points(){
+  const pts = [];
+  filteredShots().forEach(s=>{
+    const ph=String(s.phase||'').toLowerCase();
+    if(ph==='approach'||ph==='around'){
+      const {x,y}=getXY(s);
+      if(typeof x==="number" && typeof y==="number"){ pts.push({x,y,R:+(s.distance_m||0)}); }
+    }
+  });
+  return pts;
 }
 
-// 클럽별 테이블
+function drawGreenMap(){
+  const canvas=$('#canvasHM'); const ctx=canvas.getContext('2d'); const W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  // Controls
+  const LEN = Math.max(10, +$('#greenLen').value||30); // m (front-back)
+  const WID = Math.max(8, +$('#greenWid').value||20);  // m (left-right)
+  const STEP = Math.max(2, +$('#ringStep').value||5);
+  const optRings = $('#optRings').checked;
+  const optFill = $('#optFill').checked;
+  const optDensity = $('#optDensity').checked;
+  const optPoints = $('#optPoints').checked;
+
+  // Data
+  const pts = gatherAPP_ARG_points();
+  const n = pts.length;
+
+  // If no data
+  if(!n){
+    // Background
+    const grd=ctx.createLinearGradient(0,0,0,H); grd.addColorStop(0,'#f0fdf4'); grd.addColorStop(1,'#ecfeff');
+    ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#6b7280'; ctx.font='13px system-ui'; ctx.fillText('APP/ARG 좌표 데이터가 없습니다.', 20, 28);
+    $('#hmStats').textContent='–';
+    return;
+  }
+
+  // Compute stats
+  const meanX=pts.reduce((a,b)=>a+b.x,0)/n;
+  const meanY=pts.reduce((a,b)=>a+b.y,0)/n;
+  let sxx=0, syy=0, sxy=0, rsum=0;
+  let maxAbsX=0, maxAbsY=0;
+  pts.forEach(p=>{
+    const dx=p.x-meanX, dy=p.y-meanY;
+    sxx+=dx*dx; syy+=dy*dy; sxy+=dx*dy;
+    const r=Math.hypot(p.x,p.y); rsum+=r;
+    maxAbsX=Math.max(maxAbsX,Math.abs(p.x)); maxAbsY=Math.max(maxAbsY,Math.abs(p.y));
+  });
+  sxx/=n; syy/=n; sxy/=n;
+  const tr=sxx+syy, det=sxx*syy - sxy*sxy, tmp=Math.sqrt(Math.max(0, tr*tr/4 - det));
+  const l1=tr/2 + tmp, l2=tr/2 - tmp;                    // eigenvalues
+  const theta=Math.atan2(l1 - sxx, sxy || 1e-9);         // major axis angle
+  const sigmaX = Math.sqrt(sxx), sigmaY = Math.sqrt(syy);
+  const a1 = Math.sqrt(Math.max(l1,0));                  // 1σ semi-major (m)
+  const b1 = Math.sqrt(Math.max(l2,0));                  // 1σ semi-minor (m)
+  const rbar = rsum / n;                                 // 평균 분산거리(m)
+
+  // Scale: include green extents and data extents
+  const halfX = Math.max(WID/2, maxAbsX, a1*2) + 3; // +margin
+  const halfY = Math.max(LEN/2, maxAbsY, b1*2) + 3;
+  const scale = Math.min( (W-80)/(2*halfX), (H-80)/(2*halfY) ); // px per meter
+  const CX = W/2, CY = H/2;
+  const tx = (x)=> CX + x*scale;
+  const ty = (y)=> CY - y*scale;
+
+  // Background
+  ctx.fillStyle='#f8fafc'; ctx.fillRect(0,0,W,H);
+
+  // Draw green (ellipse)
+  function drawEllipseOutline(cx,cy,rx,ry,stroke,fill,fillAlpha=1,strokeDash=null){
+    ctx.save(); ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);
+    if(fill){ ctx.fillStyle = fill; ctx.globalAlpha=fillAlpha; ctx.fill(); ctx.globalAlpha=1; }
+    if(stroke){ if(strokeDash){ ctx.setLineDash(strokeDash); } ctx.strokeStyle=stroke; ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]); }
+    ctx.restore();
+  }
+  // Green fill gradient
+  const g = ctx.createRadialGradient(CX, CY, 0, CX, CY, Math.max(W,H)/2);
+  g.addColorStop(0,'#ccfbe5'); g.addColorStop(1,'#dcfce7');
+  drawEllipseOutline(CX, CY, (WID/2)*scale, (LEN/2)*scale, '#86efac', g, 0.9);
+
+  // Axes crosshair
+  ctx.strokeStyle='#cfd8e3'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(CX, 20); ctx.lineTo(CX, H-20); ctx.moveTo(20, CY); ctx.lineTo(W-20, CY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Concentric rings (distance from pin)
+  if(optRings){
+    ctx.strokeStyle='#d1d5db'; ctx.fillStyle='#64748b'; ctx.lineWidth=1;
+    for(let r=STEP; r<=Math.max(LEN,WID,Math.max(maxAbsX,maxAbsY)*2); r+=STEP){
+      ctx.beginPath(); ctx.arc(CX, CY, r*scale, 0, Math.PI*2); ctx.stroke();
+      // label
+      ctx.font='11px system-ui'; ctx.fillText(`${r}m`, CX + r*scale + 4, CY - 2);
+    }
+  }
+
+  // Points/Density
+  if(optDensity){
+    // faint shadow dots to express density
+    pts.forEach(p=>{
+      ctx.beginPath();
+      ctx.fillStyle='rgba(15, 23, 42, 0.08)'; // slate alpha
+      ctx.arc(tx(p.x), ty(p.y), 8, 0, Math.PI*2);
+      ctx.fill();
+    });
+  }
+  if(optPoints){
+    pts.forEach(p=>{
+      ctx.beginPath();
+      ctx.fillStyle='rgba(15, 23, 42, 0.85)';
+      ctx.arc(tx(p.x), ty(p.y), 2.2, 0, Math.PI*2);
+      ctx.fill();
+    });
+  }
+
+  // σ-ellipses (rotate by theta)
+  function drawSigmaEllipse(k, style){ // k = 1 or 2
+    const rx = (k*a1)*scale, ry = (k*b1)*scale;
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(-theta);
+    ctx.beginPath(); ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);
+    if(style==='fill'){ ctx.fillStyle='rgba(34,197,94,0.22)'; ctx.fill(); }
+    else { ctx.setLineDash([6,6]); ctx.strokeStyle='#6b7280'; ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]); }
+    ctx.restore();
+  }
+  if(optFill) drawSigmaEllipse(1,'fill');
+  drawSigmaEllipse(2,'stroke');
+
+  // Mean vector arrow (pin -> mean)
+  function drawArrow(x0,y0,x1,y1,color){
+    ctx.save();
+    ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(tx(x0),ty(y0)); ctx.lineTo(tx(x1),ty(y1)); ctx.stroke();
+    // arrow head
+    const ang = Math.atan2(ty(y1)-ty(y0), tx(x1)-tx(x0));
+    const head=8;
+    ctx.beginPath();
+    ctx.moveTo(tx(x1),ty(y1));
+    ctx.lineTo(tx(x1)-head*Math.cos(ang-Math.PI/6), ty(y1)-head*Math.sin(ang-Math.PI/6));
+    ctx.lineTo(tx(x1)-head*Math.cos(ang+Math.PI/6), ty(y1)-head*Math.sin(ang+Math.PI/6));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  drawArrow(0,0,meanX,meanY,'#111827');
+
+  // r̄ label near arrow tip
+  ctx.fillStyle='#111827'; ctx.font='12px ui-monospace';
+  ctx.fillText(`r̄=${rbar.toFixed(2)}m`, tx(meanX)+8, ty(meanY)-6);
+
+  // Pin flag
+  ctx.save();
+  ctx.beginPath(); ctx.arc(CX, CY, 3, 0, Math.PI*2); ctx.fillStyle='#ef4444'; ctx.fill();
+  ctx.strokeStyle='#ef4444'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX, CY-(10)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(CX, CY-(10)); ctx.lineTo(CX+10, CY-(14)); ctx.lineTo(CX, CY-(18)); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
+  ctx.restore();
+
+  // Stats badge
+  // Acc%는 lateral 기준 근사(추천 r 사용)
+  const samples = pts.map(p=>({D:p.x, R:Math.min(200,Math.max(5,p.R||50))}));
+  const bias = meanX;
+  const sigma = Math.sqrt(sxx); // lateral σ 근사 표기
+  const rRec = recommendR(samples);
+  const acc = accuracyIndex(bias, sigma, rRec);
+  // DSG(샷) 평균(표본이 APP/ARG 혼합이므로 distance_m의 분모 영향이 있으나 추정치 표시)
+  let dsgSum=0, dsgN=0;
+  filteredShots().forEach(s=>{
+    const ph=String(s.phase||'').toLowerCase();
+    if((ph==='approach'||ph==='around') && isDSGTarget(s)){
+      const D=lateralD(s); if(D!=null){ dsgSum += dispersionSG(D, s.distance_m||0); dsgN++; }
+    }
+  });
+  const dsgAvg = dsgN ? (dsgSum/dsgN) : 0;
+
+  $('#hmStats').textContent = `n=${n} · x̄=${meanX.toFixed(2)}m · ȳ=${meanY.toFixed(2)}m · σx=${sigmaX.toFixed(2)}m · σy=${sigmaY.toFixed(2)}m · r̄=${rbar.toFixed(2)}m · Acc≈${(acc*100).toFixed(0)}% · DSG/샷=${dsgAvg.toFixed(2)}`;
+}
+
+// ===== 클럽 테이블/품질/라운드 테이블 =====
 function renderClubTable(){ const shots = filteredShots().filter(s=> isDSGTarget(s) ); const byClub = new Map(); for(const s of shots){ const D = lateralD(s); if(D==null) continue; const R = Number(s.distance_m)||0; const k=s.club||'unknown'; if(!byClub.has(k)) byClub.set(k, []); byClub.get(k).push({D,R}); }
   const tbody = $('#tblClub tbody'); tbody.innerHTML=''; const rows=[]; byClub.forEach((arr,club)=>{ const n=arr.length; if(!n) return; const bias = arr.reduce((a,v)=>a+v.D,0)/n; const sigma = Math.sqrt(arr.map(v=>(v.D-bias)**2).reduce((a,b)=>a+b,0)/n); const r = recommendR(arr); const acc = accuracyIndex(bias, sigma, r); const avgDsg = arr.reduce((a,v)=>a+dispersionSG(v.D, v.R),0)/n; rows.push({club,n,bias:+bias.toFixed(2),sigma:+sigma.toFixed(2),acc:+(acc*100).toFixed(1),avgDsg:+avgDsg.toFixed(3)}); });
   rows.sort((a,b)=>b.n-a.n); rows.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.club}</td><td>${r.n}</td><td>${r.bias}</td><td>${r.sigma}</td><td>${r.acc}</td><td>${r.avgDsg}</td>`; tbody.appendChild(tr); });
 }
 
-// 테이블 (라운드/홀)
-function renderRoundTable(){ const host=$('#roundTable'); host.innerHTML=''; const by=groupByRound(filteredShots()); for(const [rid, arr] of by.entries()){ const roundMeta = APP.rounds.find(r=>r.roundId===rid); const table=document.createElement('table'); const thead=`<tr><th>Round</th><th>Date</th><th>Hole</th><th>Seq</th><th>Phase</th><th>Lie</th><th>OnG</th><th>Dist(m)</th><th>Remain(m)</th><th>ToPin(m)</th><th>Club</th><th>Penalty</th><th>Holed</th></tr>`; const rows = arr.map(s=>`<tr><td>${rid}</td><td>${dateISO(roundMeta?.date)||''}</td><td>${s.hole}</td><td>${s.sequence}</td><td>${s.phase}</td><td>${s.lie||''}</td><td>${s.on_green? 'Y':'-'}</td><td>${s.distance_m??''}</td><td>${s.remaining_m??''}</td><td>${s.landing_to_pin_m??''}</td><td>${s.club??''}</td><td>${s.penalty||0}</td><td>${s.holed?'Y':'-'}</td></tr>`).join(''); table.innerHTML=`<thead>${thead}</thead><tbody>${rows}</tbody>`; const wrap=document.createElement('div'); wrap.style.marginBottom='16px'; wrap.innerHTML=`<div class="badge" style="margin-bottom:6px;">Round: ${rid} • ${roundMeta?`${roundMeta.playerId||''} • ${roundMeta.course||''}`:''}</div>`; wrap.appendChild(table); host.appendChild(wrap); }
-}
+function renderRoundTable(){ const host=$('#roundTable'); host.innerHTML=''; const by=groupByRound(filteredShots()); for(const [rid, arr] of by.entries()){ const roundMeta = APP.rounds.find(r=>r.roundId===rid); const table=document.createElement('table'); const thead=`<tr><th>Round</th><th>Date</th><th>Hole</th><th>Seq</th><th>Phase</th><th>Lie</th><th>OnG</th><th>Dist(m)</th><th>Remain(m)</th><th>ToPin(m)</th><th>Club</th><th>Penalty</th><th>Holed</th><th>SG(샷)</th><th>DSG(샷)</th></tr>`; const rows = annotateRoundShots(rid).map(s=>`<tr><td>${rid}</td><td>${dateISO(roundMeta?.date)||''}</td><td>${s.hole}</td><td>${s.sequence}</td><td>${s.phase}</td><td>${s.lie||''}</td><td>${s.on_green? 'Y':'-'}</td><td>${s.distance_m??''}</td><td>${s.remaining_m??''}</td><td>${s.landing_to_pin_m??''}</td><td>${s.club??''}</td><td>${s.penalty||0}</td><td>${s.holed?'Y':'-'}</td><td>${(s.sg_shot||0).toFixed(3)}</td><td>${(s.dsg_shot||0).toFixed(3)}</td></tr>`).join(''); table.innerHTML=`<thead>${thead}</thead><tbody>${rows}</tbody>`; const wrap=document.createElement('div'); wrap.style.marginBottom='16px'; wrap.innerHTML=`<div class="badge" style="margin-bottom:6px;">Round: ${rid} • ${roundMeta?`${roundMeta.playerId||''} • ${roundMeta.course||''}`:''}</div>`; wrap.appendChild(table); host.appendChild(wrap); } }
+function annotateRoundShots(rid){ const arr=(groupByRound(filteredShots()).get(rid)||[]).slice(); arr.sort((a,b)=> (a.hole-b.hole)||(a.sequence-b.sequence)); for(let i=0;i<arr.length;i++){ const s=arr[i]; const next=(i<arr.length-1 && arr[i+1].hole===s.hole) ? arr[i+1] : null; s.sg_shot=+sgPerShot(s,next).toFixed(3); let dsg=0; if(isDSGTarget(s)){ const D=lateralD(s); const R=Number(s.distance_m)||0; if(D!=null && !isNaN(D)) dsg=dispersionSG(D,R); } s.dsg_shot=+dsg.toFixed(3); } return arr; }
 
-// 합계 계산 & 차트 업데이트 번들
-function drawAll(){ renderKPIs(); renderDQ(); drawCharts(); drawHeatmap(); renderClubTable(); renderRoundTable(); updateLoadedBadge(); }
+// ===== 합계 계산 & 차트/맵 업데이트 =====
+function drawAll(){ renderKPIs(); drawCharts(); drawGreenMap(); renderClubTable(); renderDQ(); renderRoundTable(); updateLoadedBadge(); }
 
-// ===== 데이터 로딩/머지/검증 =====
+// ===== 데이터 로딩/검증 =====
 function validate(payload){ const badge=$('#validBadge'); $('#schemaBadge').textContent = 'schema: ' + (payload.schema_version||'unknown'); if(!Array.isArray(payload.rounds)) throw new Error('rounds 배열 누락'); if(!Array.isArray(payload.shots))  throw new Error('shots 배열 누락'); badge.textContent='유효성: OK'; badge.classList.remove('muted'); badge.classList.add('ok'); }
 function updateLoadedBadge(){ const b=$('#loadedBadge'); b.textContent = `라운드: ${APP.rounds.length} / 샷: ${APP.shots.length}`; }
 function clearData(){ APP.raw=null; APP.rounds=[]; APP.shots=[]; drawAll(); }
@@ -320,25 +499,15 @@ $('#btnApplyAnchor').addEventListener('click', ()=>{ const txt=$('#pasteAnchor')
 $('#btnClear').addEventListener('click', clearData);
 $('#btnPrint').addEventListener('click', ()=> window.print());
 $('#btnDownload').addEventListener('click', ()=>{ if(!APP.rounds.length){ alert('저장할 데이터가 없습니다.'); return; } const blob=new Blob([JSON.stringify({schema_version:'kdk-1.0.0', rounds:APP.rounds, shots:APP.shots},null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='khronicle_merged.json'; a.click(); URL.revokeObjectURL(url); });
-$('#btnGenLesson').addEventListener('click', ()=>{ alert(generateLesson()); });
+// Redraw Green Map on option changes
+$('#btnRedrawHM').addEventListener('click', drawGreenMap);
+['greenLen','greenWid','ringStep','optRings','optFill','optDensity','optPoints'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', drawGreenMap);
+});
 
 // 파일 입력(복수)
 $('#fileInputData').addEventListener('change', async (e)=>{ const files = Array.from(e.target.files||[]); if(!files.length) return; const mode = $('#mergeMode').value; if(mode==='replace') clearData(); for(const f of files){ const raw = await f.text(); try{ const o=JSON.parse(raw); ingest(o); }catch(err){ alert(`파일 ${f.name} 파싱 실패: ${err.message}`); } } });
 $('#fileInputAnchor').addEventListener('change', async (e)=>{ const f=e.target.files[0]; if(!f) return; const raw = await f.text(); try{ const o=JSON.parse(raw); applyAnchor(o); saveAnchorToCache(o);}catch(err){ alert(`앵커 파일 오류: ${err.message}`); } });
-
-// ===== 레슨 리포트(요약 문장 생성) =====
-function generateLesson(){ const rows=perRoundAgg(); if(!rows.length) return '데이터가 없습니다.'; const dsgAvg = rows.reduce((a,r)=>a+r.dsg.total,0)/rows.length; const accAPP = rows.map(r=>r.acc.APP.acc).filter(Boolean); const accARG = rows.map(r=>r.acc.ARG.acc).filter(Boolean); const accA = (accAPP.length? (accAPP.reduce((a,b)=>a+b,0)/accAPP.length) : 0); const accG = (accARG.length? (accARG.reduce((a,b)=>a+b,0)/accARG.length) : 0); const fir = rows.length? (rows.reduce((a,r)=>a+pct(r.fir.hit,r.fir.ch),0)/rows.length) : 0; const gir = rows.length? (rows.reduce((a,r)=>a+pct(r.gir.hit,r.gir.ch),0)/rows.length) : 0;
-  const lines = [];
-  lines.push(`DSG 평균(라운드): ${dsgAvg.toFixed(2)} — 0에 가까울수록 분산/편차가 작습니다.`);
-  lines.push(`Accuracy(APP/ARG): ${(accA*100).toFixed(1)}% / ${(accG*100).toFixed(1)}%`);
-  lines.push(`FIR/GIR 평균: ${fir.toFixed(1)}% / ${gir.toFixed(1)}%`);
-  // 개선 제안 (간단 규칙)
-  if(accA<0.7){ lines.push('• APP 좌우 편차가 큼 → 에이밍/클럽 길이 점검, 120–170m 구간 집중 루틴 설계'); }
-  if(accG<0.75){ lines.push('• ARG 산포가 큼 → 20–40m 거리 제어 + 랜딩 스폿 훈련(σ 10% 감축 목표)'); }
-  if(dsgAvg<-0.6){ lines.push('• DSG가 크다(음의 손실) → 좌우 편차 D의 절대값 축소가 시급'); }
-  if(fir<55){ lines.push('• FIR 55% 미만 → 티샷 전략/클럽 선택 재정렬'); }
-  if(gir<60){ lines.push('• GIR 60% 미만 → 파온 전략(안전 쪽/핀 하단) 전환 고려'); }
-  return lines.join('\n'); }
 
 // ===== 부트스트랩 =====
 (function(){ applyAnchor(APP.anchor); renderFilters(); drawAll(); })();
