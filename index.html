@@ -1,503 +1,171 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Khronicle PRO — Final (Tabbed · Green Map · DSG · Accuracy)</title>
-<link rel="preconnect" href="https://cdn.jsdelivr.net"/>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<style>
-:root{
-  --brand:#2b2363; --accent:#4b3dd1; --good:#10b981; --bad:#ef4444; --warn:#f59e0b;
-  --bg:#f6f7fb; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --border:#e6e8ef; --shadow:0 10px 26px rgba(0,0,0,.08);
+// donna-indices.js
+// shots[], getHolePar(hole), expectedPuttsFromM(m), expectedStrokesOffGreenFromM(m, lie)
+// 를 주입받아 Donna 고유 지표 계산
+
+export function makeDonnaIndices({ shots, getHolePar,
+  expectedPuttsFromM, expectedStrokesOffGreenFromM }) {
+
+  const laneVal = l => (l==='LF' ? -1 : l==='RF' ? +1 : 0);
+  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+  const mean=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0;
+
+  const U = {
+    LG:1,CG:1,RG:1,
+    LF:0.6,CF:0.6,RF:0.6,
+    LR:0.4,RR:0.4,
+    LBK:0.2,RBK:0.2,
+    LOB:0,ROB:0,HZ:0,
+    TEE:0.5
+  };
+
+  function estThreePuttProb(m){
+    const d=Math.max(0,Number(m||0));
+    if(d<=2) return 0.01; if(d<=4) return 0.03; if(d<=6) return 0.06; if(d<=8) return 0.10;
+    if(d<=10) return 0.15; if(d<=12) return 0.20; if(d<=15) return 0.26; if(d<=20) return 0.33;
+    if(d<=25) return 0.40; if(d<=30) return 0.48; if(d<=40) return 0.55; return 0.60;
+  }
+
+  function estimateTwoOnPenaltyRisk(roundIds){
+    const rset=new Set(roundIds);
+    const twoOnShots = shots.filter(
+      s=> rset.has(s.roundId) &&
+          s.phase==='approach' &&
+          s.two_on_try===true
+    );
+    const n=twoOnShots.length;
+    const sev = twoOnShots.map(s=>Number(s.penalty||0));
+    const freq = n? (sev.filter(x=>x>0).length / n) : 0.06;
+    const avgSev = sev.length? mean(sev) : 1.3;
+    return { p:freq, avg:avgSev };
+  }
+
+  function computeSAIForRounds(roundIds){
+    const rset=new Set(roundIds);
+    const risk=estimateTwoOnPenaltyRisk(roundIds);
+    const window=[80,90,100,110];
+    const arr=[];
+    shots.forEach(s=>{
+      if(!rset.has(s.roundId)) return;
+      if(s.phase!=='approach') return;
+      const par=getHolePar(s.hole);
+      if(par!==5) return;
+      const d=Number(s.distance_m||0); if(d<=0) return;
+
+      const ego = expectedStrokesOffGreenFromM(d, s.lie) + (risk.p*risk.avg);
+      let elay=Infinity;
+      window.forEach(t=>{
+        const e = 1 + expectedStrokesOffGreenFromM(t,'CF');
+        if(e<elay) elay=e;
+      });
+      const chosen = (s.two_on_try===true)?ego:elay;
+      arr.push(chosen - Math.min(ego,elay));
+    });
+    return {mean:mean(arr), n:arr.length};
+  }
+
+  function computeLIGForRounds(roundIds){
+    const rset=new Set(roundIds); const arr=[];
+    shots.forEach(s=>{
+      if(!rset.has(s.roundId)) return;
+      const next=shots.find(n=>
+        n.roundId===s.roundId &&
+        n.hole===s.hole &&
+        n.sequence===s.sequence+1
+      );
+      if(!next) return;
+      arr.push( (U[next.lie]??0) - (U[s.lie]??0) );
+    });
+    return {mean:mean(arr), n:arr.length};
+  }
+
+  function computeMQSForRounds(roundIds){
+    const rset=new Set(roundIds); const arr=[];
+    const alpha=0.05,beta=0.10,gamma=0.05; const rM=15;
+    shots.forEach(s=>{
+      if(!rset.has(s.roundId)) return;
+      if(!s.on_green) return;
+      if(s.rel_x_m==null || s.rel_y_m==null) return;
+      const x=+s.rel_x_m, y=+s.rel_y_m;
+      const r=Math.hypot(x,y);
+      const P=1-Math.min(1, r/rM);
+      const aimL=(s.aim==='LF'||s.aim==='LG'),
+            aimR=(s.aim==='RF'||s.aim==='RG');
+      const aimMismatch=(aimL&&x>0)||(aimR&&x<0);
+      const mqs=P
+        -(y<0?alpha:0)
+        -(y>0?beta:0)
+        -(aimMismatch?gamma:0);
+      arr.push(mqs);
+    });
+    return {mean:mean(arr), n:arr.length};
+  }
+
+  function computeTTPForRounds(roundIds){
+    const rset=new Set(roundIds); const arr=[];
+    shots.forEach(s=>{
+      if(!rset.has(s.roundId)) return;
+      if(s.phase!=='tee') return;
+      const t=1-Math.abs(laneVal(s.aim)-laneVal(s.lie))/2;
+      arr.push(t);
+    });
+    return {mean:mean(arr), n:arr.length};
+  }
+
+  function computeTPIForRounds(roundIds){
+    const rset=new Set(roundIds); const arr=[];
+    for(let h=1;h<=18;h++){
+      const putts=shots
+        .filter(s=> rset.has(s.roundId) &&
+                    s.hole===h &&
+                    s.phase==='putt')
+        .sort((a,b)=>a.sequence-b.sequence);
+      if(!putts.length) continue;
+      const pi3=estThreePuttProb(+putts[0].distance_m||0);
+      arr.push( putts.length>=3 ? -pi3 : +pi3 );
+    }
+    return {mean:mean(arr), n:arr.length};
+  }
+
+  function computePDIForRounds(roundIds){
+    const rset=new Set(roundIds); const arr=[];
+    shots.forEach(s=>{
+      if(!rset.has(s.roundId)) return;
+      const pen=+s.penalty||0;
+      if(!pen) return;
+      const next=shots.find(n=>
+        n.roundId===s.roundId &&
+        n.hole===s.hole &&
+        n.sequence===s.sequence+1
+      );
+      const nxtU = next? (U[next.lie]??0) : 0.6;
+      const extra=Math.max(0, 0.6-nxtU);
+      arr.push(pen+extra);
+    });
+    return {mean:mean(arr), n:arr.length};
+  }
+
+  function computeDGI(SAI,LIG,MQS,TTP,TPI,PDI){
+    const SAI_s=clamp(-SAI/0.20,-2,2);
+    const LIG_s=clamp(LIG/0.30,-2,2);
+    const MQS_s=clamp(MQS/0.30,-2,2);
+    const TTP_s=clamp((TTP-0.70)/0.15,-2,2);
+    const TPI_s=clamp(TPI/0.20,-2,2);
+    const PDI_s=clamp(-PDI/1.50,-2,2);
+    const w={SAI:.15,LIG:.10,MQS:.10,TTP:.05,TPI:.10,PDI:.10},
+          sw=w.SAI+w.LIG+w.MQS+w.TTP+w.TPI+w.PDI;
+    return (w.SAI*SAI_s+w.LIG*LIG_s+w.MQS*MQS_s+w.TTP*TTP_s+w.TPI*TPI_s+w.PDI*PDI_s)/sw;
+  }
+
+  function computeAll(roundIds){
+    const SAI=computeSAIForRounds(roundIds).mean;
+    const LIG=computeLIGForRounds(roundIds).mean;
+    const MQS=computeMQSForRounds(roundIds).mean;
+    const TTP=computeTTPForRounds(roundIds).mean;
+    const TPI=computeTPIForRounds(roundIds).mean;
+    const PDI=computePDIForRounds(roundIds).mean;
+    const DGI=computeDGI(SAI,LIG,MQS,TTP,TPI,PDI);
+    return {SAI,LIG,MQS,TTP,TPI,PDI,DGI};
+  }
+
+  return { computeAll };
 }
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",Helvetica,Arial,sans-serif}
-.wrap{max-width:1420px;margin:0 auto;padding:16px}
-
-/* top toolbar */
-.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:10px 12px;box-shadow:var(--shadow)}
-.toolbar .left,.toolbar .right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.pill{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:999px;background:#eef2ff;color:#3730a3}
-.pill.muted{background:#eef1f7;color:var(--muted)}
-.btn{cursor:pointer;border:1px solid var(--border);background:#fff;padding:8px 12px;border-radius:10px}
-.btn.brand{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn.ghost{background:#f8fafc}
-.select,input[type="number"],input[type="text"],input[type="date"]{border:1px solid var(--border);background:#fff;padding:8px 12px;border-radius:10px}
-
-/* grid / card */
-.grid{display:grid;gap:16px;margin-top:16px}
-.grid.two{grid-template-columns:1.3fr 1fr}
-.grid.three{grid-template-columns:1fr 1fr 1fr}
-@media(max-width:1100px){.grid.two,.grid.three{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:14px;box-shadow:var(--shadow)}
-.section-title{font-weight:800;font-size:18px;margin:4px 0 10px}
-.small{font-size:12px;color:var(--muted)}
-.kpis{display:flex;gap:8px;flex-wrap:wrap}
-.kpi{flex:1;min-width:160px;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
-.kpi h4{margin:0 0 6px 0;font-size:12px;color:#374151}
-.kpi .v{font:600 18px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.badge{display:inline-flex;align-items:center;gap:8px;padding:3px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);background:#fff}
-.badge.ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
-.badge.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
-.badge.bad{background:#fef2f2;border-color:#fecaca;color:#991b1b}
-
-/* tables / canvas */
-.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:12px;max-height:520px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left;white-space:nowrap}
-canvas{width:100%!important;height:360px!important}
-
-/* Tabs */
-.tabbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-.tab{border:1px solid var(--border);padding:8px 12px;border-radius:10px;background:#fff;cursor:pointer}
-.tab.active{background:var(--brand);color:#fff;border-color:var(--brand)}
-.tabpanel{display:none}
-.tabpanel.active{display:block}
-
-/* Explorer */
-#holeList{max-height:540px;overflow:auto;border:1px solid var(--border);border-radius:10px}
-.hole-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
-.hole-item.active{background:#eef2ff}
-.tag{display:inline-block;font-size:11px;padding:2px 6px;border-radius:8px;border:1px solid var(--border);background:#fff;margin-left:6px}
-.stat{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#111827}
-
-/* Green Map */
-.canvas-wrap{position:relative}
-#canvasHM{border:1px solid var(--border);border-radius:14px;background:#f8fafc}
-.hm-stats{position:absolute;left:10px;top:10px}
-.hm-legend{position:absolute;right:10px;top:10px;display:flex;gap:6px;align-items:center}
-.hm-legend .box{width:14px;height:10px;border:1px solid var(--border);border-radius:3px}
-
-/* print */
-@media print{ .toolbar,.no-print{display:none!important} .card{box-shadow:none;border:1px solid #ddd} body{background:#fff} .tabpanel{display:block!important}}
-
-/* inputs hidden */
-input[type="file"]{display:none}
-.file-label{border:1px dashed var(--border);padding:10px 12px;border-radius:12px;background:#fafbff;cursor:pointer}
-textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:12px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <!-- Toolbar -->
-  <div class="toolbar no-print">
-    <div class="left">
-      <span class="pill"><b>Khronicle PRO — Final</b> <span id="schemaBadge" class="small" style="margin-left:6px">schema: –</span></span>
-      <label class="file-label">라운드 JSON 불러오기(여러개)
-        <input id="fileInputData" type="file" accept=".json,application/json" multiple/>
-      </label>
-      <label class="file-label">앵커 v2(JSON) 불러오기
-        <input id="fileInputAnchor" type="file" accept=".json,application/json"/>
-      </label>
-      <select id="mergeMode" class="select"><option value="append">합치기(append)</option><option value="replace">교체(replace)</option></select>
-      <button class="btn" id="btnClear">초기화</button>
-      <button class="btn ghost" id="btnPrint">리포트(PDF)</button>
-    </div>
-    <div class="right">
-      <button class="btn" id="btnDownload">현재 데이터 저장</button>
-      <button class="btn" id="btnGenLesson">레슨 리포트 생성</button>
-      <span id="anchorBadge" class="pill muted">앵커: 기본(내장)</span>
-      <span id="loadedBadge" class="pill muted">라운드: 0 / 샷: 0</span>
-    </div>
-  </div>
-
-  <!-- Filters -->
-  <div class="card" style="margin-top:12px">
-    <div class="section-title">필터</div>
-    <div class="row">
-      <select id="fltType" class="select"><option value="all">All</option><option value="practice">Practice</option><option value="tournament">Tournament</option></select>
-      <select id="fltPlayer" class="select"><option value="all">Player: All</option></select>
-      <select id="fltCourse" class="select"><option value="all">Course: All</option></select>
-      <label class="small">기간</label>
-      <input id="fltFrom" type="date" class="select"><span class="small">~</span><input id="fltTo" type="date" class="select">
-      <button class="btn brand" id="btnApplyFilters">적용</button>
-    </div>
-    <div class="small" style="margin-top:6px">* 필터는 모든 탭/차트/테이블/리포트에 즉시 반영됩니다.</div>
-  </div>
-
-  <!-- Tabbar -->
-  <div class="tabbar no-print">
-    <button class="tab active" data-tab="overview">Overview</button>
-    <button class="tab" data-tab="greenmap">Green Map</button>
-    <button class="tab" data-tab="explorer">Shot Explorer</button>
-    <button class="tab" data-tab="dispersion">Dispersion Lab</button>
-    <button class="tab" data-tab="putting">Putting</button>
-    <button class="tab" data-tab="coach">Coach</button>
-    <button class="tab" data-tab="dq">Data Quality</button>
-  </div>
-
-  <!-- OVERVIEW -->
-  <div id="tab-overview" class="tabpanel active">
-    <div class="grid three">
-      <div class="card">
-        <div class="section-title">요약</div>
-        <div class="kpis" id="kpiBox"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">라운드별 SG 합계</div>
-        <canvas id="sgChart"></canvas>
-      </div>
-      <div class="card">
-        <div class="section-title">SG 구성(OTT/APP/ARG/PUTT)</div>
-        <canvas id="sgStack"></canvas>
-      </div>
-    </div>
-
-    <div class="grid three">
-      <div class="card">
-        <div class="section-title">FIR / GIR</div>
-        <canvas id="firGirChart"></canvas>
-      </div>
-      <div class="card">
-        <div class="section-title">Up & Down / Sand Save</div>
-        <canvas id="udChart"></canvas>
-      </div>
-      <div class="card">
-        <div class="section-title">퍼팅(1펏/3펏/평균)</div>
-        <canvas id="puttChart"></canvas>
-      </div>
-    </div>
-
-    <div class="grid">
-      <div class="card">
-        <div class="section-title">라운드별 DSG 합계 & Accuracy %</div>
-        <canvas id="dsgChart"></canvas>
-        <div class="small">DSG = -k(R)·(|D|/R)² (대상: APP/ARG, ≤200m)</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- GREEN MAP -->
-  <div id="tab-greenmap" class="tabpanel">
-    <div class="grid two">
-      <div class="card">
-        <div class="section-title">그린·핀 기준 분산 지도 (σ 타원)</div>
-        <div class="row small">
-          <label>그린 길이(m)</label><input id="greenLen" type="number" class="select" value="30" min="10" max="60" step="1"/>
-          <label>그린 폭(m)</label><input id="greenWid" type="number" class="select" value="20" min="8" max="40" step="1"/>
-          <label>링 간격(m)</label><input id="ringStep" type="number" class="select" value="5" min="2" max="10" step="1"/>
-          <label class="small"><input id="optRings" type="checkbox" checked/> Rings</label>
-          <label class="small"><input id="optFill" type="checkbox" checked/> 1σ Fill</label>
-          <label class="small"><input id="optDensity" type="checkbox" checked/> Density</label>
-          <label class="small"><input id="optPoints" type="checkbox" checked/> Points</label>
-          <button class="btn ghost" id="btnRedrawHM">적용</button>
-        </div>
-        <div class="canvas-wrap" style="margin-top:8px">
-          <canvas id="canvasHM" width="640" height="420"></canvas>
-          <div id="hmStats" class="badge hm-stats">–</div>
-          <div class="hm-legend small">
-            <span class="box" style="background:#ccfbe5"></span><span>그린</span>
-            <span class="box" style="background:#86efac"></span><span>1σ</span>
-            <span class="box" style="background:#fff"></span><span style="border-bottom:2px dashed #6b7280">2σ</span>
-          </div>
-        </div>
-        <div class="small" style="margin-top:6px">핀은 중심(0,0). 동심원 숫자는 핀으로부터의 <b>거리(m)</b>. 화살표는 <b>평균 편차 벡터</b>(r̄=평균 분산거리).</div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">클럽별 분산(APP/ARG, ≤200m)</div>
-        <div class="table-wrap"><table id="tblClub"><thead><tr><th>Club</th><th>샷수</th><th>Bias(m)</th><th>σ(m)</th><th>Acc%</th><th>평균 DSG</th></tr></thead><tbody></tbody></table></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- EXPLORER -->
-  <div id="tab-explorer" class="tabpanel">
-    <div class="grid two">
-      <div class="card">
-        <div class="section-title">라운드 & 홀 선택</div>
-        <div class="row"><select id="selRound" class="select"><option value="">Round: –</option></select><span class="badge" id="roundMeta"></span></div>
-        <div id="holeList" style="margin-top:10px"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">선택 홀 — 샷 타임라인(워터폴: 누적 SG)</div>
-        <canvas id="wfChart"></canvas>
-        <hr class="sep"/>
-        <div class="section-title">그린 착지 분포 & DSG</div>
-        <canvas id="greenCanvas" height="360"></canvas>
-        <div class="small" id="holeSummary" style="margin-top:6px"></div>
-      </div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="section-title">샷 상세(선택 홀)</div>
-      <div class="table-wrap"><table id="tblShots">
-        <thead><tr><th>#</th><th>Phase</th><th>Lie</th><th>OnG</th><th>Dist(m)</th><th>Remain(m)</th><th>ToPin(m)</th><th>Club</th><th>PEN</th><th>Holed</th><th>SG(샷)</th><th>DSG(샷)</th></tr></thead><tbody></tbody>
-      </table></div>
-    </div>
-  </div>
-
-  <!-- DISPERSION LAB -->
-  <div id="tab-dispersion" class="tabpanel">
-    <div class="card">
-      <div class="section-title">Distance × Lie 매트릭스(APP/ARG ≤200m)</div>
-      <div class="row">
-        <label class="small">거리 bin(m):</label><input id="binSize" type="number" class="select" value="10" min="5" max="25" step="5"/>
-        <label class="small">색상기준:</label>
-        <select id="matrixMode" class="select">
-          <option value="acc">Accuracy % (높을수록 좋음)</option>
-          <option value="dsg">평균 DSG (0에 가까울수록 좋음)</option>
-          <option value="sigma">σ (작을수록 좋음)</option>
-          <option value="bias">|Bias| (작을수록 좋음)</option>
-        </select>
-        <button id="btnBuildMatrix" class="btn brand">재계산</button>
-      </div>
-      <div class="row small" style="margin-top:6px">
-        <span class="badge ok">TIP</span> <span>거리/라이 조합별 <b>Acc/σ/Bias/DSG</b>를 즉시 비교합니다.</span>
-      </div>
-      <div class="table-wrap" style="margin-top:10px"><table id="matrixTbl" class="matrix"></table></div>
-    </div>
-
-    <div class="grid two">
-      <div class="card">
-        <div class="section-title">미스 패턴(좌/우/숏/롱)</div>
-        <canvas id="polarMiss"></canvas>
-        <div class="small">좌/우 = x 편차, 숏/롱 = y 편차 기반 사분면 비중 및 손실(그린 외 착지도 포함).</div>
-      </div>
-      <div class="card">
-        <div class="section-title">품질 점검 핵심</div>
-        <ul id="dqListMini" class="small" style="line-height:1.6"></ul>
-      </div>
-    </div>
-  </div>
-
-  <!-- PUTTING -->
-  <div id="tab-putting" class="tabpanel">
-    <div class="grid two">
-      <div class="card"><div class="section-title">First Putt → Leave(평균)</div><canvas id="puttLeave"></canvas></div>
-      <div class="card"><div class="section-title">3-Putt 위험 곡선</div><canvas id="puttRisk"></canvas></div>
-    </div>
-  </div>
-
-  <!-- COACH -->
-  <div id="tab-coach" class="tabpanel">
-    <div class="grid two">
-      <div class="card"><div class="section-title">자동 인사이트</div><ul id="coachList" class="small" style="line-height:1.6"></ul></div>
-      <div class="card"><div class="section-title">레슨 리포트(요약 텍스트)</div><textarea id="lessonText" readonly></textarea></div>
-    </div>
-  </div>
-
-  <!-- DQ -->
-  <div id="tab-dq" class="tabpanel">
-    <div class="card">
-      <div class="section-title">품질 점검</div>
-      <ul id="dqList" class="small" style="line-height:1.6"></ul>
-      <hr class="sep"/>
-      <div class="small">권장 입력: <code>coord.x_rel_m,y_rel_m</code> → 없으면 <code>rel_x_m, rel_y_m</code> → 또는 <code>bearing+to_pin</code></div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="section-title">스코어카드 & 홀별 요약</div>
-      <div id="roundTable"></div>
-    </div>
-  </div>
-</div>
-
-<script>
-// ===== 전역 상태 =====
-let APP={raw:null,rounds:[],shots:[],charts:{},anchor:null};
-let FILTER={type:'all',player:'all',course:'all',from:null,to:null};
-let SEL={roundId:null,hole:null};
-
-// ===== 앵커 v2(토이) =====
-const BUILTIN_ANCHOR={schema:"builtin-toy",
-  putt_ft:Array.from({length:100},(_,i)=>Math.max(1,Math.min(3,0.80*Math.log((i+1)+1)+0.9))),
-  off_yd:{FW:Array.from({length:246},(_,k)=>2.6+0.0025*(k+5)),RF:Array.from({length:246},(_,k)=>2.75+0.0025*(k+5)),BK:Array.from({length:246},(_,k)=>2.85+0.0027*(k+5)),TR:Array.from({length:246},(_,k)=>2.9+0.0029*(k+5)),HZ:Array.from({length:246},(_,k)=>3.0+0.0032*(k+5))}
-};
-function saveAnchorToCache(a){try{localStorage.setItem("kdk:expected_v2",JSON.stringify(a));}catch(e){}}
-function loadAnchorFromCache(){try{const raw=localStorage.getItem("kdk:expected_v2");if(!raw)return null;const o=JSON.parse(raw);if(o&&(o.schema==="expected-v2"||o.schema==="builtin-toy"))return o;return null}catch(e){return null}}
-function applyAnchor(a){APP.anchor=a||BUILTIN_ANCHOR;document.getElementById('anchorBadge').textContent="앵커: "+(APP.anchor.schema==="expected-v2"?"v2 적용":"기본(내장)");}
-APP.anchor=loadAnchorFromCache()||BUILTIN_ANCHOR;
-
-// ===== 유틸 =====
-const $=(s)=>document.querySelector(s);
-function clamp(v,min,max){return Math.max(min,Math.min(max,v))}
-function lerp(a,b,t){return a+(b-a)*t}
-function interp1(arr,idx){const i0=clamp(Math.floor(idx),0,arr.length-1),i1=clamp(i0+1,0,arr.length-1),t=clamp(idx-i0,0,1);return lerp(arr[i0],arr[i1],t)}
-function mapLieKey(l){const s=String(l||"").toUpperCase();if(s.includes("HZ"))return"HZ";if(s.includes("BK"))return"BK";if(s.includes("TR")||s.includes("TREE"))return"TR";if(s.includes("RF")||s.includes("R")||s.includes("FESCUE"))return"RF";return"FW"}
-function expectedFromV2(m,phase,lie,on_green){const A=APP.anchor||BUILTIN_ANCHOR;if(on_green||String(phase||'').toLowerCase()==='putt'){const ft=clamp((m||0)*3.28084,1,100);return interp1(A.putt_ft,ft-1)}else{const yd=clamp((m||0)*1.09361,5,250);const key=mapLieKey(lie);const tbl=A.off_yd[key]||A.off_yd.FW;return interp1(tbl,yd-5)}}
-function expectedStrokes(m,phase,lie,on_green){return expectedFromV2(m,phase,lie,on_green)}
-function dateISO(d){try{return new Date(d).toISOString().slice(0,10)}catch(e){return""}}
-
-// DSG / Accuracy
-function kForShot(R){const r=+R||0;if(r<=0)return 0;if(r<80)return 3.2;if(r<150)return 4.6;return 6.0}
-function dispersionSG(D,R){const r=+R||0;if(r<=0||D==null||isNaN(D))return 0;return -kForShot(r)*Math.pow(Math.abs(D)/r,2)}
-function accuracyIndex(b,s,r){if(!r||r<=0)return 0;return Math.exp(-((b*b+s*s)/(r*r)))}
-function recommendR(samples){if(!samples||!samples.length)return 10;const rs=samples.map(v=>Math.max(5,Math.min(200,+v.R||0))).sort((a,b)=>a-b);const mid=rs[Math.floor(rs.length/2)]||50;return Math.max(3,Math.round(mid*0.06))}
-function classifyShot(s){const p=String(s.phase||'').toLowerCase();if(p==='tee')return'OTT';if(p==='approach')return'APP';if(p==='around')return'ARG';if(p==='putt')return'PUTT';return'OTHER'}
-function sgPerShot(s,next){const start=(typeof s.distance_m==="number"?s.distance_m:s.remaining_m);const e0=expectedStrokes(start,s.phase,s.lie,s.on_green);const e1=next?expectedStrokes((typeof next.distance_m==="number"?next.distance_m:next.remaining_m),next.phase,next.lie,next.on_green):0;const penalty=+(s.penalty||0);return e0-(1+penalty+e1)}
-function lateralD(s){if(s.coord&&typeof s.coord.x_rel_m==="number")return s.coord.x_rel_m;if(typeof s.rel_x_m==="number")return s.rel_x_m;if(typeof s.landing_bearing_deg==="number"&&typeof s.landing_to_pin_m==="number"){const rad=s.landing_bearing_deg*Math.PI/180;return (s.landing_to_pin_m||0)*Math.cos(rad)}return null}
-function getXY(s){const x=(s.coord&&typeof s.coord.x_rel_m==="number")?s.coord.x_rel_m:(typeof s.rel_x_m==="number"?s.rel_x_m:null);const y=(s.coord&&typeof s.coord.y_rel_m==="number")?s.coord.y_rel_m:(typeof s.rel_y_m==="number"?s.rel_y_m:null);return {x,y}}
-function isDSGTarget(s){const ph=String(s.phase||'').toLowerCase();if(ph==='putt')return false;if(ph!=='approach'&&ph!=='around')return false;const R=+(s.distance_m||0);return(R>0&&R<=200)}
-
-// ===== 필터/라운드 =====
-function renderFilters(){
-  const playerSet=new Set(APP.rounds.map(r=>r.playerId).filter(Boolean));
-  const courseSet=new Set(APP.rounds.map(r=>r.course).filter(Boolean));
-  $('#fltPlayer').innerHTML='<option value="all">Player: All</option>'+Array.from(playerSet).map(p=>`<option value="${p}">${p}</option>`).join('');
-  $('#fltCourse').innerHTML='<option value="all">Course: All</option>'+Array.from(courseSet).map(c=>`<option value="${c}">${c}</option>`).join('');
-  const opts=APP.rounds.map(r=>`<option value="${r.roundId}">${r.roundId} — ${r.playerId||''} · ${r.course||''} · ${dateISO(r.date)}</option>`).join('');
-  $('#selRound').innerHTML='<option value="">Round: –</option>'+opts;
-}
-function applyFilters(){FILTER.type=$('#fltType').value;FILTER.player=$('#fltPlayer').value;FILTER.course=$('#fltCourse').value;FILTER.from=$('#fltFrom').value||null;FILTER.to=$('#fltTo').value||null;drawAll()}
-function roundInFilter(r){if(FILTER.type!=='all'&&(r.type||'').toLowerCase()!==FILTER.type)return false;if(FILTER.player!=='all'&&r.playerId!==FILTER.player)return false;if(FILTER.course!=='all'&&r.course!==FILTER.course)return false;const di=dateISO(r.date);if(FILTER.from&&di&&di<FILTER.from)return false;if(FILTER.to&&di&&di>FILTER.to)return false;return true}
-function filteredRounds(){return APP.rounds.filter(roundInFilter)}
-function filteredShots(){const set=new Set(filteredRounds().map(r=>r.roundId));return APP.shots.filter(s=>set.has(s.roundId))}
-function groupByRound(shots){const by=new Map();for(const s of shots){const k=s.roundId||'R?';if(!by.has(k))by.set(k,[]);by.get(k).push(s)}for(const arr of by.values()){arr.sort((a,b)=>(a.hole-b.hole)||(a.sequence-b.sequence))}return by}
-function roundsById(){const m=new Map();for(const r of APP.rounds){m.set(r.roundId,r)}return m}
-
-// ===== 집계 =====
-function perRoundAgg(){const by=groupByRound(filteredShots());const rmap=roundsById();const rows=[];for(const [rid,arr] of by.entries()){let sg=0,comp={OTT:0,APP:0,ARG:0,PUTT:0},pen=0,onePutts=0,threePutts=0,firHit=0,firCh=0,girHit=0,girCh=0,updownMake=0,updownCh=0,sandSave=0,sandCh=0,lastHole=null,dsgTotal=0,dsgApp=0,dsgArg=0;const samplesAPP=[],samplesARG=[];const puttsByHole=new Map();for(let i=0;i<arr.length;i++){const s=arr[i];const next=(i<arr.length-1&&arr[i+1].hole===s.hole)?arr[i+1]:null;const c=classifyShot(s);const val=sgPerShot(s,next);sg+=val;comp[c]=(comp[c]||0)+val;pen+=+(s.penalty||0);if(lastHole!==s.hole){const par=rmap.get(rid)?.parArray?.[s.hole-1]||null;if(par&&(par===4||par===5))firCh++;lastHole=s.hole}if(c==='OTT'&&String(s.lie||"").toUpperCase().includes("F"))firHit++;girCh++;if(s.on_green)girHit++;if(c==='ARG'){updownCh++;const isSand=String(s.lie||'').toUpperCase().includes('BK');if(isSand)sandCh++;const next2=arr[i+2];if(next&&(next.holed||(next2&&next2.holed))){updownMake++;if(isSand)sandSave++}}if(c==='PUTT'){puttsByHole.set(s.hole,(puttsByHole.get(s.hole)||0)+1)}if(isDSGTarget(s)){const D=lateralD(s);if(D!=null&&!isNaN(D)){const R=+(s.distance_m||0);const dsg=dispersionSG(D,R);dsgTotal+=dsg;if(c==='APP'){dsgApp+=dsg;samplesAPP.push({D,R,club:s.club})}if(c==='ARG'){dsgArg+=dsg;samplesARG.push({D,R,club:s.club})}}}}for(const n of puttsByHole.values()){if(n===1)onePutts++;if(n>=3)threePutts++}const holes=new Set(arr.map(x=>x.hole)).size||1;const avgPutt=(Array.from(puttsByHole.values()).reduce((a,b)=>a+b,0))/holes;function pack(samples){if(!samples.length)return{bias:0,sigma:0,r:10,acc:0};const bias=samples.reduce((a,v)=>a+v.D,0)/samples.length;const sigma=Math.sqrt(samples.map(v=>(v.D-bias)**2).reduce((a,b)=>a+b,0)/samples.length);const r=recommendR(samples);const acc=accuracyIndex(bias,sigma,r);return{bias:+bias.toFixed(2),sigma:+sigma.toFixed(2),r,acc:+acc.toFixed(4)}}rows.push({roundId:rid,sg:+sg.toFixed(3),comp:{OTT:+(comp.OTT||0).toFixed(3),APP:+(comp.APP||0).toFixed(3),ARG:+(comp.ARG||0).toFixed(3),PUTT:+(comp.PUTT||0).toFixed(3)},fir:{hit:firHit,ch:firCh},gir:{hit:girHit,ch:girCh},updown:{make:updownMake,ch:updownCh},sand:{make:sandSave,ch:sandCh},putt:{one:onePutts,three:threePutts,avg:+(avgPutt||0).toFixed(2)},penalties:pen,dsg:{total:+dsgTotal.toFixed(3),APP:+dsgApp.toFixed(3),ARG:+dsgArg.toFixed(3)},acc:{APP:pack(samplesAPP),ARG:pack(samplesARG)}})}return rows}
-
-// ===== KPI / DQ =====
-function pct(a,b){return (b>0)?+(100*a/b).toFixed(1):0}
-function renderKPIs(){const rounds=filteredRounds();const shots=filteredShots();const rows=perRoundAgg();const kpi=[{t:'라운드',v:rounds.length},{t:'샷 수',v:shots.length},{t:'평균 SG/라운드',v:(rows.reduce((a,r)=>a+r.sg,0)/(rows.length||1)).toFixed(2)},{t:'FIR%',v:(rows.length?(rows.reduce((a,r)=>a+pct(r.fir.hit,r.fir.ch),0)/rows.length).toFixed(1):'0.0')+'%'},{t:'GIR%',v:(rows.length?(rows.reduce((a,r)=>a+pct(r.gir.hit,r.gir.ch),0)/rows.length).toFixed(1):'0.0')+'%'},{t:'DSG/라운드',v:(rows.reduce((a,r)=>a+r.dsg.total,0)/(rows.length||1)).toFixed(2)}];const host=$('#kpiBox');host.innerHTML='';kpi.forEach(k=>{const d=document.createElement('div');d.className='kpi';d.innerHTML=`<h4>${k.t}</h4><div class="v">${k.v}</div>`;host.appendChild(d)})}
-function renderDQ(){const shots=filteredShots();const total=shots.length||1;const dsgTar=shots.filter(isDSGTarget);const withCoord=dsgTar.filter(s=>lateralD(s)!=null);const warns=[];const pDsg=+(100*dsgTar.length/total).toFixed(1),pCoord=+(100*withCoord.length/(dsgTar.length||1)).toFixed(1);warns.push(`DSG 대상(APP/ARG ≤200m) 비중: <b>${pDsg}%</b> (${dsgTar.length}/${total})`);warns.push(`DSG 대상 중 좌/우 편차 보유: <b>${pCoord}%</b> (${withCoord.length}/${dsgTar.length||1})`);const tooLong=shots.filter(s=>['approach','around'].includes(String(s.phase||'').toLowerCase())&&(s.distance_m||0)>200).length;if(tooLong>0)warns.push(`200m 초과 APP/ARG: ${tooLong}건 → DSG 제외됨`);$('#dqList').innerHTML=warns.map(w=>`<li>${w}</li>`).join('');$('#dqListMini').innerHTML=warns.map(w=>`<li>${w}</li>`).join('')}
-
-// ===== 차트(Overview) =====
-function drawCharts(){const rows=perRoundAgg();const labels=rows.map(r=>r.roundId);
-  APP.charts.sg&&APP.charts.sg.destroy();APP.charts.sg=new Chart($('#sgChart').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'SG(합계)',data:rows.map(r=>r.sg)}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
-  const dOTT=rows.map(r=>r.comp.OTT),dAPP=rows.map(r=>r.comp.APP),dARG=rows.map(r=>r.comp.ARG),dPUTT=rows.map(r=>r.comp.PUTT);
-  APP.charts.sgStack&&APP.charts.sgStack.destroy();APP.charts.sgStack=new Chart($('#sgStack').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'OTT',data:dOTT,stack:'sg'},{label:'APP',data:dAPP,stack:'sg'},{label:'ARG',data:dARG,stack:'sg'},{label:'PUTT',data:dPUTT,stack:'sg'}]},options:{responsive:true,scales:{y:{beginAtZero:true}}}});
-  const firPct=rows.map(r=>pct(r.fir.hit,r.fir.ch)),girPct=rows.map(r=>pct(r.gir.hit,r.gir.ch));
-  APP.charts.fg&&APP.charts.fg.destroy();APP.charts.fg=new Chart($('#firGirChart').getContext('2d'),{type:'line',data:{labels,datasets:[{label:'FIR %',data:firPct},{label:'GIR %',data:girPct}]},options:{responsive:true}});
-  const udPct=rows.map(r=>pct(r.updown.make,r.updown.ch)),ssPct=rows.map(r=>pct(r.sand.make,r.sand.ch));
-  APP.charts.ud&&APP.charts.ud.destroy();APP.charts.ud=new Chart($('#udChart').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'Up&Down %',data:udPct},{label:'Sand Save %',data:ssPct}]},options:{responsive:true,scales:{y:{beginAtZero:true,max:100}}}});
-  const oneP=rows.map(r=>r.putt.one),threeP=rows.map(r=>r.putt.three),avgP=rows.map(r=>r.putt.avg);
-  APP.charts.putt&&APP.charts.putt.destroy();APP.charts.putt=new Chart($('#puttChart').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'1펏 수',data:oneP,yAxisID:'y'},{label:'3펏 수',data:threeP,yAxisID:'y'},{label:'평균 퍼트(홀당)',data:avgP,type:'line',yAxisID:'y1'}]},options:{responsive:true,scales:{y:{beginAtZero:true},y1:{position:'right',beginAtZero:true}}}});
-  APP.charts.dsg&&APP.charts.dsg.destroy();APP.charts.dsg=new Chart($('#dsgChart').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'DSG Total',data:rows.map(r=>r.dsg.total)},{label:'Acc(APP)%',data:rows.map(r=>(r.acc?.APP?.acc||0)*100),type:'line',yAxisID:'y1'},{label:'Acc(ARG)%',data:rows.map(r=>(r.acc?.ARG?.acc||0)*100),type:'line',yAxisID:'y1'}]},options:{responsive:true,scales:{y:{beginAtZero:true},y1:{position:'right',beginAtZero:true,max:100}}}});
-}
-
-// ===== Green Map (σ-Dispersion) =====
-function gatherAPP_ARG_points(){const pts=[];filteredShots().forEach(s=>{const ph=String(s.phase||'').toLowerCase();if(ph==='approach'||ph==='around'){const {x,y}=getXY(s);if(typeof x==="number"&&typeof y==="number"){pts.push({x,y,R:+(s.distance_m||0)})}}});return pts;}
-function drawGreenMap(){
-  const canvas=$('#canvasHM'); if(!canvas) return;
-  const ctx=canvas.getContext('2d'); const W=canvas.width,H=canvas.height;
-  ctx.clearRect(0,0,W,H);
-  const LEN=Math.max(10,+$('#greenLen').value||30);
-  const WID=Math.max(8,+$('#greenWid').value||20);
-  const STEP=Math.max(2,+$('#ringStep').value||5);
-  const optRings=$('#optRings').checked, optFill=$('#optFill').checked, optDensity=$('#optDensity').checked, optPoints=$('#optPoints').checked;
-  const pts=gatherAPP_ARG_points(); const n=pts.length;
-  if(!n){const grd=ctx.createLinearGradient(0,0,0,H);grd.addColorStop(0,'#f0fdf4');grd.addColorStop(1,'#ecfeff');ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);ctx.fillStyle='#6b7280';ctx.font='13px system-ui';ctx.fillText('APP/ARG 좌표 데이터가 없습니다.',20,28);$('#hmStats').textContent='–';return;}
-  const meanX=pts.reduce((a,b)=>a+b.x,0)/n, meanY=pts.reduce((a,b)=>a+b.y,0)/n;
-  let sxx=0,syy=0,sxy=0,rsum=0,maxAbsX=0,maxAbsY=0; pts.forEach(p=>{const dx=p.x-meanX,dy=p.y-meanY;sxx+=dx*dx;syy+=dy*dy;sxy+=dx*dy;rsum+=Math.hypot(p.x,p.y);maxAbsX=Math.max(maxAbsX,Math.abs(p.x));maxAbsY=Math.max(maxAbsY,Math.abs(p.y));});
-  sxx/=n;syy/=n;sxy/=n;
-  const tr=sxx+syy,det=sxx*syy-sxy*sxy,tmp=Math.sqrt(Math.max(0,tr*tr/4-det)),l1=tr/2+tmp,l2=tr/2-tmp,theta=Math.atan2(l1-sxx, sxy||1e-9);
-  const a1=Math.sqrt(Math.max(l1,0)), b1=Math.sqrt(Math.max(l2,0)), rbar=rsum/n, sigmaX=Math.sqrt(sxx), sigmaY=Math.sqrt(syy);
-  const halfX=Math.max(WID/2,maxAbsX,a1*2)+3, halfY=Math.max(LEN/2,maxAbsY,b1*2)+3;
-  const scale=Math.min((W-80)/(2*halfX),(H-80)/(2*halfY)), CX=W/2, CY=H/2; const tx=(x)=>CX+x*scale, ty=(y)=>CY-y*scale;
-  // bg
-  ctx.fillStyle='#f8fafc'; ctx.fillRect(0,0,W,H);
-  // green
-  const g=ctx.createRadialGradient(CX,CY,0,CX,CY,Math.max(W,H)/2); g.addColorStop(0,'#ccfbe5'); g.addColorStop(1,'#dcfce7');
-  ctx.save(); ctx.beginPath(); ctx.ellipse(CX,CY,(WID/2)*scale,(LEN/2)*scale,0,0,Math.PI*2); ctx.fillStyle=g; ctx.globalAlpha=.9; ctx.fill(); ctx.globalAlpha=1; ctx.lineWidth=2; ctx.strokeStyle='#86efac'; ctx.stroke(); ctx.restore();
-  // axes
-  ctx.strokeStyle='#cfd8e3'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(CX,20); ctx.lineTo(CX,H-20); ctx.moveTo(20,CY); ctx.lineTo(W-20,CY); ctx.stroke(); ctx.setLineDash([]);
-  // rings
-  if(optRings){ctx.strokeStyle='#d1d5db'; ctx.fillStyle='#64748b'; ctx.lineWidth=1; for(let r=STEP;r<=Math.max(LEN,WID,Math.max(maxAbsX,maxAbsY)*2);r+=STEP){ctx.beginPath(); ctx.arc(CX,CY,r*scale,0,Math.PI*2); ctx.stroke(); ctx.font='11px system-ui'; ctx.fillText(`${r}m`, CX+r*scale+4, CY-2);}}
-  // density & points
-  if(optDensity){pts.forEach(p=>{ctx.beginPath();ctx.fillStyle='rgba(15, 23, 42, 0.08)';ctx.arc(tx(p.x),ty(p.y),8,0,Math.PI*2);ctx.fill();});}
-  if(optPoints){pts.forEach(p=>{ctx.beginPath();ctx.fillStyle='rgba(15, 23, 42, 0.85)';ctx.arc(tx(p.x),ty(p.y),2.2,0,Math.PI*2);ctx.fill();});}
-  // sigma ellipses
-  function drawSigmaEllipse(k,style){const rx=(k*a1)*scale, ry=(k*b1)*scale;ctx.save();ctx.translate(CX,CY);ctx.rotate(-theta);ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);if(style==='fill'){ctx.fillStyle='rgba(34,197,94,0.22)';ctx.fill();}else{ctx.setLineDash([6,6]);ctx.strokeStyle='#6b7280';ctx.lineWidth=2;ctx.stroke();ctx.setLineDash([]);}ctx.restore();}
-  if($('#optFill').checked) drawSigmaEllipse(1,'fill'); drawSigmaEllipse(2,'stroke');
-  // mean vector
-  function arrow(x0,y0,x1,y1,c){ctx.save();ctx.strokeStyle=c;ctx.fillStyle=c;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(tx(x0),ty(y0));ctx.lineTo(tx(x1),ty(y1));ctx.stroke();const ang=Math.atan2(ty(y1)-ty(y0),tx(x1)-tx(x0)),h=8;ctx.beginPath();ctx.moveTo(tx(x1),ty(y1));ctx.lineTo(tx(x1)-h*Math.cos(ang-Math.PI/6),ty(y1)-h*Math.sin(ang-Math.PI/6));ctx.lineTo(tx(x1)-h*Math.cos(ang+Math.PI/6),ty(y1)-h*Math.sin(ang+Math.PI/6));ctx.closePath();ctx.fill();ctx.restore();}
-  arrow(0,0,meanX,meanY,'#111827'); ctx.fillStyle='#111827'; ctx.font='12px ui-monospace'; ctx.fillText(`r̄=${rbar.toFixed(2)}m`, tx(meanX)+8, ty(meanY)-6);
-  // pin flag
-  ctx.save(); ctx.beginPath(); ctx.arc(CX,CY,3,0,Math.PI*2); ctx.fillStyle='#ef4444'; ctx.fill(); ctx.strokeStyle='#ef4444'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(CX,CY); ctx.lineTo(CX,CY-10); ctx.stroke(); ctx.beginPath(); ctx.moveTo(CX,CY-10); ctx.lineTo(CX+10,CY-14); ctx.lineTo(CX,CY-18); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill(); ctx.restore();
-  // stats badge
-  const samples=pts.map(p=>({D:p.x,R:Math.min(200,Math.max(5,p.R||50))})); const bias=meanX, sigma=Math.sqrt(sxx), rRec=recommendR(samples), acc=accuracyIndex(bias,sigma,rRec);
-  let dsgSum=0,dsgN=0; filteredShots().forEach(s=>{const ph=String(s.phase||'').toLowerCase();if((ph==='approach'||ph==='around')&&isDSGTarget(s)){const D=lateralD(s);if(D!=null){dsgSum+=dispersionSG(D,s.distance_m||0);dsgN++;}}});
-  const dsgAvg=dsgN?(dsgSum/dsgN):0;
-  $('#hmStats').textContent=`n=${n} · x̄=${meanX.toFixed(2)}m · ȳ=${meanY.toFixed(2)}m · σx=${sigmaX.toFixed(2)}m · σy=${sigmaY.toFixed(2)}m · r̄=${rbar.toFixed(2)}m · Acc≈${(acc*100).toFixed(0)}% · DSG/샷=${dsgAvg.toFixed(2)}`;
-}
-
-// ===== Explorer =====
-function annotateRoundShots(rid){const arr=(groupByRound(filteredShots()).get(rid)||[]).slice();arr.sort((a,b)=>(a.hole-b.hole)||(a.sequence-b.sequence));for(let i=0;i<arr.length;i++){const s=arr[i];const next=(i<arr.length-1&&arr[i+1].hole===s.hole)?arr[i+1]:null;s.sg_shot=+sgPerShot(s,next).toFixed(3);let dsg=0;if(isDSGTarget(s)){const D=lateralD(s);const R=+(s.distance_m||0);if(D!=null&&!isNaN(D))dsg=dispersionSG(D,R)}s.dsg_shot=+dsg.toFixed(3)}const byHole=new Map();for(const s of arr){if(!byHole.has(s.hole))byHole.set(s.hole,0);const c=byHole.get(s.hole)+(s.sg_shot||0);byHole.set(s.hole,c);s.cum_sg_by_hole=+c.toFixed(3)}return arr}
-function renderHoleList(rid){const host=$('#holeList');host.innerHTML='';if(!rid)return;const arr=annotateRoundShots(rid);const holes=Array.from(new Set(arr.map(s=>s.hole))).sort((a,b)=>a-b);const byHole=new Map();for(const s of arr){if(!byHole.has(s.hole))byHole.set(s.hole,[]);byHole.get(s.hole).push(s)}for(const h of holes){const shots=byHole.get(h)||[];const sgHole=shots.reduce((a,b)=>a+(b.sg_shot||0),0);const onePutt=shots.filter(x=>String(x.phase||'').toLowerCase()==='putt').length===1?'1P':'';const el=document.createElement('div');el.className='hole-item'+(SEL.hole===h?' active':'');el.dataset.hole=h;el.innerHTML=`<div>Hole ${h} <span class="tag">${onePutt||' '}</span></div><div class="stat">${sgHole.toFixed(2)}</div>`;el.addEventListener('click',()=>{SEL.hole=h;drawExplorer(rid,h);document.querySelectorAll('.hole-item').forEach(x=>x.classList.remove('active'));el.classList.add('active')});host.appendChild(el)}if(!SEL.hole&&holes.length){SEL.hole=holes[0]}drawExplorer(rid,SEL.hole)}
-function drawExplorer(rid,hole){
-  const arr=annotateRoundShots(rid).filter(s=>s.hole===hole);
-  const meta=APP.rounds.find(r=>r.roundId===rid); $('#roundMeta').textContent=meta?`${meta.playerId||''} · ${meta.course||''} · ${dateISO(meta.date)}`:'';
-  const labels=arr.map((s,i)=>`S${i+1}`), cum=arr.map(s=>s.cum_sg_by_hole||0);
-  APP.charts.wf&&APP.charts.wf.destroy(); APP.charts.wf=new Chart($('#wfChart').getContext('2d'),{type:'line',data:{labels,datasets:[{label:'누적 SG',data:cum,tension:0.3}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
-  const cvs=$('#greenCanvas'); const ctx=cvs.getContext('2d'); const W=cvs.width,H=cvs.height;
-  ctx.clearRect(0,0,W,H); ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillRect(20,20,W-40,H-40); ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(W/2,20); ctx.lineTo(W/2,H-20); ctx.moveTo(20,H/2); ctx.lineTo(W-20,H/2); ctx.stroke();
-  const scale=6,CX=W/2,CY=H-40,tx=(x)=>CX+x*scale,ty=(y)=>CY-y*scale;
-  arr.forEach((s,i)=>{const {x,y}=getXY(s); if(typeof x==="number"&&typeof y==="number"){const v=s.dsg_shot||0; let col='#10b981'; if(v<-0.6)col='#ef4444'; else if(v<-0.3)col='#f59e0b'; else col='#10b981'; ctx.fillStyle=col; ctx.beginPath(); ctx.arc(tx(x),ty(y),4,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#111827'; ctx.font='11px ui-monospace'; ctx.fillText(`S${i+1}`,tx(x)+6,ty(y)-6) }});
-  const tb=$('#tblShots tbody'); tb.innerHTML=''; arr.forEach((s,i)=>{const tr=document.createElement('tr'); tr.innerHTML=`<td>${i+1}</td><td>${s.phase}</td><td>${s.lie||''}</td><td>${s.on_green?'Y':'-'}</td><td>${s.distance_m??''}</td><td>${s.remaining_m??''}</td><td>${s.landing_to_pin_m??''}</td><td>${s.club??''}</td><td>${s.penalty||0}</td><td>${s.holed?'Y':'-'}</td><td>${(s.sg_shot||0).toFixed(3)}</td><td>${(s.dsg_shot||0).toFixed(3)}</td>`; tb.appendChild(tr)});
-  const sgHole=arr.reduce((a,b)=>a+(b.sg_shot||0),0).toFixed(2), dsgHole=arr.reduce((a,b)=>a+(b.dsg_shot||0),0).toFixed(2); $('#holeSummary').textContent=`Hole ${hole}: SG ${sgHole}, DSG ${dsgHole}, 샷수 ${arr.length}`;
-}
-$('#selRound').addEventListener('change',e=>{SEL.roundId=e.target.value||null;SEL.hole=null;if(SEL.roundId){renderHoleList(SEL.roundId)}else{$('#holeList').innerHTML='';$('#tblShots tbody').innerHTML=''}});
-
-// ===== Dispersion Lab =====
-function buildMatrix(){const bin=Math.max(5,Math.min(25,+($('#binSize').value)||10));const mode=$('#matrixMode').value;const shots=filteredShots().filter(s=>isDSGTarget(s));const buckets=new Map();function keyFor(d,lie){const b=Math.floor(d/bin)*bin;return `${b}-${lie}`}for(const s of shots){const R=+(s.distance_m||0);const lie=mapLieKey(s.lie);const D=lateralD(s);if(D==null)continue;const k=keyFor(R,lie);if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push({D,R})}
-  const dists=Array.from(new Set(Array.from(buckets.keys()).map(k=>+k.split('-')[0]))).sort((a,b)=>a-b);const lies=['FW','RF','BK','TR','HZ'];
-  const tbl=$('#matrixTbl'); tbl.innerHTML=''; const th=document.createElement('tr'); th.innerHTML='<th>Dist↓ / Lie→</th>'+lies.map(l=>`<th>${l}</th>`).join(''); tbl.appendChild(th);
-  function colorCell(v,goodHigh=true){if(v==null||isNaN(v))return'#f5f5f5';let t=.5;if(goodHigh){const x=clamp(v,0,100);t=x/100}else{const x=Math.min(1,Math.abs(v)/0.6);t=1-x}if(t>0.66)return'#e0ffe7';if(t>0.33)return'#fff8dc';return'#ffe3e3'}
-  for(const b of dists){const tr=document.createElement('tr'); tr.innerHTML=`<th>${b}–${b+bin}m</th>`; for(const lie of lies){const k=`${b}-${lie}`;const arr=buckets.get(k)||[];let html='–',bg='#f5f5f5';if(arr.length){const n=arr.length;const bias=arr.reduce((a,v)=>a+v.D,0)/n;const sigma=Math.sqrt(arr.map(v=>(v.D-bias)**2).reduce((a,b)=>a+b,0)/n);const r=recommendR(arr);const acc=accuracyIndex(bias,sigma,r)*100;const avgDsg=arr.reduce((a,v)=>a+dispersionSG(v.D,v.R),0)/n;let metric=acc,goodHigh=true,label=`Acc ${acc.toFixed(0)}%`;if(mode==='dsg'){metric=avgDsg;goodHigh=false;label=`DSG ${avgDsg.toFixed(2)}`}if(mode==='sigma'){metric=sigma;goodHigh=false;label=`σ ${sigma.toFixed(2)}`}if(mode==='bias'){metric=Math.abs(bias);goodHigh=false;label=`|Bias| ${Math.abs(bias).toFixed(2)}`}bg=colorCell(metric,goodHigh);html=`<div class="cell"><div class="stat">${label}</div><div class="small">n=${n}</div></div>`}const td=document.createElement('td');td.style.background=bg;td.innerHTML=html;tr.appendChild(td)}tbl.appendChild(tr)}}
-$('#btnBuildMatrix').addEventListener('click',buildMatrix);
-
-function renderClubTable(){const shots=filteredShots().filter(s=>isDSGTarget(s));const byClub=new Map();for(const s of shots){const D=lateralD(s);if(D==null)continue;const R=+(s.distance_m||0);const k=s.club||'unknown';if(!byClub.has(k))byClub.set(k,[]);byClub.get(k).push({D,R})}
-  const tbody=$('#tblClub tbody'); if(!tbody) return; tbody.innerHTML=''; const rows=[];byClub.forEach((arr,club)=>{const n=arr.length;if(!n)return;const bias=arr.reduce((a,v)=>a+v.D,0)/n;const sigma=Math.sqrt(arr.map(v=>(v.D-bias)**2).reduce((a,b)=>a+b,0)/n);const r=recommendR(arr);const acc=accuracyIndex(bias,sigma,r);const avgDsg=arr.reduce((a,v)=>a+dispersionSG(v.D,v.R),0)/n;rows.push({club,n,bias:+bias.toFixed(2),sigma:+sigma.toFixed(2),acc:+(acc*100).toFixed(1),avgDsg:+avgDsg.toFixed(3)})});rows.sort((a,b)=>b.n-a.n);rows.forEach(r=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${r.club}</td><td>${r.n}</td><td>${r.bias}</td><td>${r.sigma}</td><td>${r.acc}</td><td>${r.avgDsg}</td>`;tbody.appendChild(tr)})}
-
-function drawPolarMiss(){const shots=filteredShots().filter(s=>['approach','around'].includes(String(s.phase||'').toLowerCase()));const quads={Q1:0,Q2:0,Q3:0,Q4:0},loss={Q1:0,Q2:0,Q3:0,Q4:0};let total=0;shots.forEach(s=>{const {x,y}=getXY(s);if(typeof x!=="number"||typeof y!=="number")return;let q='Q1';if(x>=0&&y>=0)q='Q1';else if(x<0&&y>=0)q='Q2';else if(x<0&&y<0)q='Q3';else q='Q4';quads[q]++;total++;const D=lateralD(s),R=+(s.distance_m||0);loss[q]+=dispersionSG(D||0,R||0)});const labels=['Q1(우/길)','Q2(좌/길)','Q3(좌/짧)','Q4(우/짧)'];const counts=[quads.Q1,quads.Q2,quads.Q3,quads.Q4];const losses=[loss.Q1,loss.Q2,loss.Q3,loss.Q4];APP.charts.polar&&APP.charts.polar.destroy();APP.charts.polar=new Chart($('#polarMiss').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'비중(%)',data:counts.map(c=>total?+(100*c/total).toFixed(1):0)},{label:'손실(DSG 합)',data:losses,yAxisID:'y1',type:'line'}]},options:{responsive:true,scales:{y:{beginAtZero:true,max:100},y1:{position:'right',beginAtZero:true}}}})}
-
-// ===== Putting =====
-function buildPuttingCurves(){const byHole=new Map();const shots=filteredShots().filter(s=>String(s.phase||'').toLowerCase()==='putt');const key=s=>`${s.roundId}-${s.hole}`;for(const s of shots){if(!byHole.has(key(s)))byHole.set(key(s),[]);byHole.get(key(s)).push(s)}const bins=new Map();function bFor(x){const ft=(+x||0)*3.28084;const b=Math.floor(ft/5)*5;return `${b}-${b+5}ft`}byHole.forEach(arr=>{arr.sort((a,b)=>a.sequence-b.sequence);const first=arr[0],last=arr[arr.length-1];const firstDist=first.distance_m??first.remaining_m??0;const leave=last.holed?0:(last.remaining_m??0);const bin=bFor(firstDist);if(!bins.has(bin))bins.set(bin,{leaveSum:0,cnt:0,three:0});const o=bins.get(bin);o.leaveSum+=leave;o.cnt+=1;if(arr.length>=3)o.three+=1});const labels=Array.from(bins.keys()).sort((a,b)=>parseInt(a)-parseInt(b));const leaveAvg=labels.map(k=>{const o=bins.get(k);return o.cnt?+((o.leaveSum/o.cnt)*3.28084).toFixed(1):0});const risk=labels.map(k=>{const o=bins.get(k);return o.cnt?+(100*o.three/o.cnt).toFixed(1):0});APP.charts.puttLeave&&APP.charts.puttLeave.destroy();APP.charts.puttLeave=new Chart($('#puttLeave').getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'평균 리브(ft)',data:leaveAvg}]},options:{responsive:true,scales:{y:{beginAtZero:true}}}});APP.charts.puttRisk&&APP.charts.puttRisk.destroy();APP.charts.puttRisk=new Chart($('#puttRisk').getContext('2d'),{type:'line',data:{labels,datasets:[{label:'3-Putt %',data:risk}]},options:{responsive:true,scales:{y:{beginAtZero:true,max:100}}}})}
-
-// ===== 스코어카드 / DQ =====
-function renderRoundTable(){const host=$('#roundTable');if(!host) return;host.innerHTML='';const by=groupByRound(filteredShots());for(const [rid,arr] of by.entries()){const roundMeta=APP.rounds.find(r=>r.roundId===rid);const table=document.createElement('table');const thead=`<tr><th>Round</th><th>Date</th><th>Hole</th><th>Seq</th><th>Phase</th><th>Lie</th><th>OnG</th><th>Dist(m)</th><th>Remain(m)</th><th>ToPin(m)</th><th>Club</th><th>Penalty</th><th>Holed</th><th>SG(샷)</th><th>DSG(샷)</th></tr>`;const rows=annotateRoundShots(rid).map(s=>`<tr><td>${rid}</td><td>${dateISO(roundMeta?.date)||''}</td><td>${s.hole}</td><td>${s.sequence}</td><td>${s.phase}</td><td>${s.lie||''}</td><td>${s.on_green?'Y':'-'}</td><td>${s.distance_m??''}</td><td>${s.remaining_m??''}</td><td>${s.landing_to_pin_m??''}</td><td>${s.club??''}</td><td>${s.penalty||0}</td><td>${s.holed?'Y':'-'}</td><td>${(s.sg_shot||0).toFixed(3)}</td><td>${(s.dsg_shot||0).toFixed(3)}</td></tr>`).join('');table.innerHTML=`<thead>${thead}</thead><tbody>${rows}</tbody>`;const wrap=document.createElement('div');wrap.style.marginBottom='16px';wrap.innerHTML=`<div class="badge" style="margin-bottom:6px;">Round: ${rid} • ${roundMeta?`${roundMeta.playerId||''} • ${roundMeta.course||''}`:''}</div>`;wrap.appendChild(table);host.appendChild(wrap)}}
-
-// ===== 합계 & 업데이트 =====
-function drawAll(){
-  renderKPIs(); drawCharts(); // Overview
-  drawGreenMap(); renderClubTable(); // Green Map
-  buildMatrix(); drawPolarMiss(); // Dispersion
-  buildPuttingCurves(); // Putting
-  renderCoach(); renderDQ(); renderRoundTable(); updateLoadedBadge();
-}
-
-// ===== Coach =====
-function renderCoach(){const rows=perRoundAgg();const ul=$('#coachList');if(ul) ul.innerHTML='';if(!rows.length){const t=$('#lessonText'); if(t) t.value='데이터가 없습니다.';return}const dsgAvg=rows.reduce((a,r)=>a+r.dsg.total,0)/rows.length;const accAPP=rows.map(r=>r.acc.APP.acc).filter(Boolean);const accARG=rows.map(r=>r.acc.ARG.acc).filter(Boolean);const accA=(accAPP.length?(accAPP.reduce((a,b)=>a+b,0)/accAPP.length):0);const accG=(accARG.length?(accARG.reduce((a,b)=>a+b,0)/accARG.length):0);const fir=(rows.length?(rows.reduce((a,r)=>a+pct(r.fir.hit,r.fir.ch),0)/rows.length):0);const gir=(rows.length?(rows.reduce((a,r)=>a+pct(r.gir.hit,r.gir.ch),0)/rows.length):0);const tips=[];if(accA<0.70)tips.push('APP 좌우 편차 ↑ → 120–170m 대역 에이밍/클럽 길이 점검 & 타깃 보정');if(accG<0.75)tips.push('ARG 산포 ↑ → 20–40m 거리제어 + 랜딩 스폿 고정 훈련');if(dsgAvg<-0.6)tips.push('DSG 손실 큼 → 좌우 편차 |D| 축소 루틴 우선');if(fir<55)tips.push('FIR<55% → 티샷 전략/클럽 로프트 재정렬');if(gir<60)tips.push('GIR<60% → 핀 하단 안전스팟 우선 공략');if(ul) ul.innerHTML=tips.map(t=>`<li>${t}</li>`).join('')||'<li>특기할 개선 권고 없음(안정적)</li>';const lines=[];lines.push(`DSG 평균(라운드): ${dsgAvg.toFixed(2)} — 0에 가까울수록 분산/편차 작음`);lines.push(`Accuracy(APP/ARG): ${(accA*100).toFixed(1)}% / ${(accG*100).toFixed(1)}%`);lines.push(`FIR/GIR 평균: ${fir.toFixed(1)}% / ${gir.toFixed(1)}%`);const t=$('#lessonText'); if(t) t.value=lines.join('\n')}
-
-// ===== 로딩/검증 =====
-function validate(payload){const badge=$('#validBadge'); if(badge){badge.textContent='유효성: OK';badge.classList.remove('muted');}$('#schemaBadge').textContent='schema: '+(payload.schema_version||'unknown');if(!Array.isArray(payload.rounds))throw new Error('rounds 배열 누락');if(!Array.isArray(payload.shots))throw new Error('shots 배열 누락')}
-function updateLoadedBadge(){const b=$('#loadedBadge');b.textContent=`라운드: ${APP.rounds.length} / 샷: ${APP.shots.length}`}
-function clearData(){APP.raw=null;APP.rounds=[];APP.shots=[];SEL.roundId=null;SEL.hole=null;drawAll()}
-function mergeIn(payload){const existingRounds=new Set(APP.rounds.map(r=>r.roundId));for(const r of (payload.rounds||[])){if(!existingRounds.has(r.roundId)){APP.rounds.push(r);existingRounds.add(r.roundId)}}const existingShots=new Set(APP.shots.map(s=>s.shotId));for(const s of (payload.shots||[])){if(!existingShots.has(s.shotId)){APP.shots.push(s);existingShots.add(s.shotId)}}}
-function ingest(payload){validate(payload);const mode=$('#mergeMode').value||'append';if(mode==='replace'||!APP.raw){APP.raw=payload;APP.rounds=[...(payload.rounds||[])];APP.shots=[...(payload.shots||[])];}else{mergeIn(payload)}renderFilters();drawAll()}
-
-// ===== 이벤트 =====
-$('#btnApplyFilters').addEventListener('click',applyFilters);
-$('#btnClear').addEventListener('click',clearData);
-$('#btnPrint').addEventListener('click',()=>window.print());
-$('#btnDownload').addEventListener('click',()=>{if(!APP.rounds.length){alert('저장할 데이터가 없습니다.');return}const blob=new Blob([JSON.stringify({schema_version:'kdk-1.0.0',rounds:APP.rounds,shots:APP.shots},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='khronicle_merged.json';a.click();URL.revokeObjectURL(url)});
-$('#btnGenLesson').addEventListener('click',()=>{alert($('#lessonText')?.value||'데이터가 없습니다.')});
-$('#fileInputData').addEventListener('change',async(e)=>{const files=Array.from(e.target.files||[]);if(!files.length)return;const mode=$('#mergeMode').value;if(mode==='replace')clearData();for(const f of files){const raw=await f.text();try{const o=JSON.parse(raw);ingest(o)}catch(err){alert(`파일 ${f.name} 파싱 실패: ${err.message}`)}}});
-$('#fileInputAnchor').addEventListener('change',async(e)=>{const f=e.target.files[0];if(!f)return;const raw=await f.text();try{const o=JSON.parse(raw);if(!o.putt_ft||!o.off_yd)throw new Error('필수 키 누락');applyAnchor(o);saveAnchorToCache(o)}catch(err){alert(`앵커 파일 오류: ${err.message}`)}});
-
-// Green Map controls
-$('#btnRedrawHM').addEventListener('click',drawGreenMap);
-['greenLen','greenWid','ringStep','optRings','optFill','optDensity','optPoints'].forEach(id=>{const el=document.getElementById(id);if(el) el.addEventListener('change',drawGreenMap)});
-
-// Tabs
-document.querySelectorAll('.tab').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    const key=btn.dataset.tab;
-    document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
-    document.getElementById('tab-'+key).classList.add('active');
-    // 재렌더(크기/레이아웃 반영)
-    drawAll();
-    if(key==='explorer'&&SEL.roundId){renderHoleList(SEL.roundId)}
-    if(key==='greenmap'){drawGreenMap()}
-  })
-});
-
-// ===== 부트스트랩 =====
-(function(){applyAnchor(APP.anchor);renderFilters();drawAll()})();
-</script>
-</body>
-</html>
